@@ -304,7 +304,7 @@ export default function ProductosScreen() {
               style={styles.input}
               value={precio}
               onChangeText={setPrecio}
-              keyboardType="numeric"
+              keyboardType="decimal-pad"
             />
 
             <Text style={styles.label}>Costo</Text>
@@ -312,7 +312,7 @@ export default function ProductosScreen() {
               style={styles.input}
               value={costo}
               onChangeText={setCosto}
-              keyboardType="numeric"
+              keyboardType="decimal-pad"
             />
 
             {tipo === 'producto' && (
@@ -322,7 +322,7 @@ export default function ProductosScreen() {
                   style={styles.input}
                   value={stockActual}
                   onChangeText={setStockActual}
-                  keyboardType="numeric"
+                  keyboardType="decimal-pad"
                 />
 
                 <Text style={styles.label}>Stock Mínimo</Text>
@@ -330,7 +330,7 @@ export default function ProductosScreen() {
                   style={styles.input}
                   value={stockMinimo}
                   onChangeText={setStockMinimo}
-                  keyboardType="numeric"
+                  keyboardType="decimal-pad"
                 />
               </>
             )}

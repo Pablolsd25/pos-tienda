@@ -16,6 +16,8 @@ export default function POSScreen() {
   const [efectivoRecibido, setEfectivoRecibido] = useState('');
   const [categoriaSeleccionada, setCategoriaSeleccionada] = useState<number | null>(null);
   const [mostrarEscaner, setMostrarEscaner] = useState(false);
+  const [editandoPrecioId, setEditandoPrecioId] = useState<string | null>(null);
+  const [precioEditando, setPrecioEditando] = useState('');
 
   const loadProductos = useCallback(async () => {
     try {
@@ -150,7 +152,23 @@ export default function POSScreen() {
     setCarrito(carrito.filter(item => item.producto.id !== productoId));
   };
 
-  const subtotal = carrito.reduce((acc, item) => acc + (item.producto.precio * item.cantidad), 0);
+  const aplicarPrecioCustom = (productoId: string) => {
+    const nuevo = parseFloat(precioEditando);
+    if (!isNaN(nuevo) && nuevo >= 0) {
+      setCarrito(carrito.map(item =>
+        item.producto.id === productoId
+          ? { ...item, precioCustom: nuevo }
+          : item
+      ));
+    }
+    setEditandoPrecioId(null);
+    setPrecioEditando('');
+  };
+
+  const subtotal = carrito.reduce((acc, item) => {
+    const precio = item.precioCustom ?? item.producto.precio;
+    return acc + precio * item.cantidad;
+  }, 0);
   const total = subtotal;
 
   const realizarVenta = async () => {
@@ -192,12 +210,13 @@ export default function POSScreen() {
 
       // Crear detalles y actualizar inventario
       for (const item of carrito) {
+        const precioUnitario = item.precioCustom ?? item.producto.precio;
         await supabase.from('venta_detalles').insert({
           venta_id: venta.id,
           producto_id: item.producto.id,
           cantidad: item.cantidad,
-          precio_unitario: item.producto.precio,
-          subtotal: item.producto.precio * item.cantidad,
+          precio_unitario: precioUnitario,
+          subtotal: precioUnitario * item.cantidad,
         });
 
         // Actualizar stock si es producto (no servicio)
@@ -266,27 +285,52 @@ export default function POSScreen() {
     </TouchableOpacity>
   );
 
-  const renderCarritoItem = ({ item }: { item: CarritoItem }) => (
-    <View style={styles.carritoItem}>
-      <View style={styles.carritoInfo}>
-        <Text style={styles.carritoNombre}>{item.producto.nombre}</Text>
-        <Text style={styles.carritoPrecio}>${item.producto.precio.toFixed(2)} c/u</Text>
-      </View>
-      <View style={styles.carritoCantidad}>
-        <TouchableOpacity onPress={() => actualizarCantidad(item.producto.id, -1)} style={styles.btnCantidad}>
-          <Text style={styles.btnCantidadText}>-</Text>
+  const renderCarritoItem = ({ item }: { item: CarritoItem }) => {
+    const precio = item.precioCustom ?? item.producto.precio;
+    const editando = editandoPrecioId === item.producto.id;
+
+    return (
+      <View style={styles.carritoItem}>
+        <View style={styles.carritoInfo}>
+          <Text style={styles.carritoNombre}>{item.producto.nombre}</Text>
+          {editando ? (
+            <TextInput
+              style={styles.precioInput}
+              value={precioEditando}
+              onChangeText={setPrecioEditando}
+              keyboardType="decimal-pad"
+              autoFocus
+              selectTextOnFocus
+              onBlur={() => aplicarPrecioCustom(item.producto.id)}
+              onSubmitEditing={() => aplicarPrecioCustom(item.producto.id)}
+            />
+          ) : (
+            <TouchableOpacity onPress={() => {
+              setEditandoPrecioId(item.producto.id);
+              setPrecioEditando(precio.toString());
+            }}>
+              <Text style={[styles.carritoPrecio, item.precioCustom !== undefined && styles.precioEditado]}>
+                ${precio.toFixed(2)} c/u {item.precioCustom !== undefined ? '(editado)' : '(toca para editar)'}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+        <View style={styles.carritoCantidad}>
+          <TouchableOpacity onPress={() => actualizarCantidad(item.producto.id, -1)} style={styles.btnCantidad}>
+            <Text style={styles.btnCantidadText}>-</Text>
+          </TouchableOpacity>
+          <Text style={styles.cantidadText}>{item.cantidad}</Text>
+          <TouchableOpacity onPress={() => actualizarCantidad(item.producto.id, 1)} style={styles.btnCantidad}>
+            <Text style={styles.btnCantidadText}>+</Text>
+          </TouchableOpacity>
+        </View>
+        <Text style={styles.carritoSubtotal}>${(precio * item.cantidad).toFixed(2)}</Text>
+        <TouchableOpacity onPress={() => quitarDelCarrito(item.producto.id)}>
+          <Text style={styles.btnQuitar}>✕</Text>
         </TouchableOpacity>
-        <Text style={styles.cantidadText}>{item.cantidad}</Text>
-        <TouchableOpacity onPress={() => actualizarCantidad(item.producto.id, 1)} style={styles.btnCantidad}>
-          <Text style={styles.btnCantidadText}>+</Text>
-        </TouchableOpacity>
       </View>
-      <Text style={styles.carritoSubtotal}>${(item.producto.precio * item.cantidad).toFixed(2)}</Text>
-      <TouchableOpacity onPress={() => quitarDelCarrito(item.producto.id)}>
-        <Text style={styles.btnQuitar}>✕</Text>
-      </TouchableOpacity>
-    </View>
-  );
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -297,11 +341,6 @@ export default function POSScreen() {
           <Text style={styles.headerStatusText}>
             {sesionActual ? '✓ Caja abierta' : '✕ Caja cerrada'}
           </Text>
-          {!sesionActual && (
-            <TouchableOpacity style={styles.btnAbrirCaja} onPress={abrirCaja}>
-              <Text style={styles.btnAbrirCajaText}>Abrir Caja</Text>
-            </TouchableOpacity>
-          )}
         </View>
       </View>
 
@@ -369,7 +408,7 @@ export default function POSScreen() {
             <Text style={styles.modalLabel}>Efectivo recibido:</Text>
             <TextInput
               style={styles.modalInput}
-              keyboardType="numeric"
+              keyboardType="decimal-pad"
               value={efectivoRecibido}
               onChangeText={setEfectivoRecibido}
               placeholder="0.00"
@@ -552,6 +591,19 @@ const styles = StyleSheet.create({
   carritoPrecio: {
     fontSize: 12,
     color: '#666',
+  },
+  precioEditado: {
+    color: '#d97706',
+    fontWeight: '600',
+  },
+  precioInput: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2563eb',
+    borderBottomWidth: 1.5,
+    borderBottomColor: '#2563eb',
+    minWidth: 80,
+    paddingVertical: 2,
   },
   carritoCantidad: {
     flexDirection: 'row',

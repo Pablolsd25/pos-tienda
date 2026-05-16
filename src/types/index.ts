@@ -70,6 +70,7 @@ export interface VentaDetalle {
 export interface CarritoItem {
   producto: Producto;
   cantidad: number;
+  precioCustom?: number; // precio editado manualmente en el carrito
 }
 
 export type RootStackParamList = {

@@ -11,6 +11,8 @@ export default function CortesCajaScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [sesionActual, setSesionActual] = useState<SesionCaja | null>(null);
   const [mostrarCierre, setMostrarCierre] = useState(false);
+  const [mostrarApertura, setMostrarApertura] = useState(false);
+  const [montoInicial, setMontoInicial] = useState('');
   const [saldoDeclarado, setSaldoDeclarado] = useState('');
   const [notas, setNotas] = useState('');
 
@@ -63,6 +65,33 @@ export default function CortesCajaScreen() {
       .eq('sesion_id', sesionId)
       .eq('estado', 'completada');
     setVentas(data || []);
+  };
+
+  const abrirCaja = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        Alert.alert('Error', 'No hay sesión activa');
+        return;
+      }
+
+      const saldo = parseFloat(montoInicial) || 0;
+
+      const { error } = await supabase.from('sesiones_caja').insert({
+        usuario_id: user.id,
+        saldo_inicial: saldo,
+        estado: 'abierta',
+        fecha_apertura: new Date().toISOString(),
+      });
+
+      if (error) throw error;
+
+      setMostrarApertura(false);
+      setMontoInicial('');
+      loadData();
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'No se pudo abrir la caja');
+    }
   };
 
   const cerrarCaja = async () => {
@@ -141,6 +170,19 @@ export default function CortesCajaScreen() {
         <Text style={styles.headerTitle}>Cortes de Caja</Text>
       </View>
 
+      {/* Sin sesión activa → botón Abrir Caja */}
+      {!sesionActual && !cargando && (
+        <View style={styles.sinSesionCard}>
+          <Text style={styles.sinSesionTexto}>No hay caja abierta</Text>
+          <TouchableOpacity
+            style={styles.btnAbrirCaja}
+            onPress={() => setMostrarApertura(true)}
+          >
+            <Text style={styles.btnAbrirCajaText}>Abrir Caja</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* Sesión actual */}
       {sesionActual && (
         <View style={styles.sesionActualCard}>
@@ -187,6 +229,46 @@ export default function CortesCajaScreen() {
         }
       />
 
+      {/* Modal de apertura de caja */}
+      <Modal visible={mostrarApertura} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Abrir Caja</Text>
+            <Text style={styles.aperturaSubtitulo}>
+              ¿Cuánto efectivo hay en caja al iniciar?
+            </Text>
+
+            <Text style={styles.label}>Monto inicial (opcional)</Text>
+            <TextInput
+              style={styles.input}
+              value={montoInicial}
+              onChangeText={setMontoInicial}
+              keyboardType="decimal-pad"
+              placeholder="0.00"
+              autoFocus
+            />
+            <Text style={styles.aperturaHint}>
+              Deja en blanco o escribe 0 si no hay efectivo inicial.
+            </Text>
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalBtnCancelar]}
+                onPress={() => { setMostrarApertura(false); setMontoInicial(''); }}
+              >
+                <Text style={styles.modalBtnCancelarText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalBtnAceptar]}
+                onPress={abrirCaja}
+              >
+                <Text style={styles.modalBtnAceptarText}>Abrir Caja</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* Modal de cierre */}
       <Modal visible={mostrarCierre} transparent animationType="slide">
         <View style={styles.modalOverlay}>
@@ -216,7 +298,7 @@ export default function CortesCajaScreen() {
                 style={styles.input}
                 value={saldoDeclarado}
                 onChangeText={setSaldoDeclarado}
-                keyboardType="numeric"
+                keyboardType="decimal-pad"
                 placeholder="0.00"
               />
 
@@ -269,6 +351,12 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
   header: { backgroundColor: '#2563eb', padding: 16, paddingTop: 48 },
   headerTitle: { color: '#fff', fontSize: 24, fontWeight: 'bold' },
+  sinSesionCard: { backgroundColor: '#eff6ff', margin: 12, padding: 20, borderRadius: 8, alignItems: 'center', borderLeftWidth: 4, borderLeftColor: '#2563eb' },
+  sinSesionTexto: { fontSize: 16, color: '#374151', marginBottom: 12 },
+  btnAbrirCaja: { backgroundColor: '#16a34a', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 8 },
+  btnAbrirCajaText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  aperturaSubtitulo: { fontSize: 14, color: '#666', textAlign: 'center', marginBottom: 8 },
+  aperturaHint: { fontSize: 12, color: '#999', marginTop: 6, textAlign: 'center' },
   sesionActualCard: { backgroundColor: '#dcfce7', margin: 12, padding: 16, borderRadius: 8, borderLeftWidth: 4, borderLeftColor: '#16a34a' },
   sesionActualHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
   sesionActualTitle: { fontSize: 18, fontWeight: 'bold', color: '#16a34a' },
