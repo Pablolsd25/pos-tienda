@@ -1,28 +1,68 @@
 import { useState, useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, Text, StyleSheet } from 'react-native';
 import { supabase } from './src/lib/supabase';
 import AppNavigator from './src/navigation/AppNavigator';
 
 export default function App() {
-  const [session, setSession] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const [listo, setListo] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setLoading(false);
-    });
+    const init = async () => {
+      try {
+        // 1. Intentar restaurar sesión existente
+        const { data: { session } } = await supabase.auth.getSession();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-    });
+        if (!session) {
+          // 2. Si no hay sesión, crear una anónima automáticamente
+          const { error: anonError } = await supabase.auth.signInAnonymously();
+          if (anonError) throw anonError;
+        }
 
-    return () => subscription.unsubscribe();
+        // 3. Garantizar que existe un perfil para este usuario
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data: perfil } = await supabase
+            .from('perfiles')
+            .select('id')
+            .eq('id', user.id)
+            .maybeSingle();
+
+          if (!perfil) {
+            await supabase.from('perfiles').insert({
+              id: user.id,
+              nombre: 'Admin',
+              rol: 'admin',
+              activo: true,
+            });
+          }
+        }
+
+        setListo(true);
+      } catch (e: any) {
+        setError(e.message || 'Error al iniciar');
+      }
+    };
+
+    init();
   }, []);
 
-  if (loading) {
+  if (error) {
+    return (
+      <View style={styles.loading}>
+        <Text style={styles.errorTitle}>No se pudo iniciar la app</Text>
+        <Text style={styles.errorMsg}>{error}</Text>
+        <Text style={styles.errorHint}>
+          Activa "Allow anonymous sign-ins" en{'\n'}
+          Supabase → Authentication → Configuration
+        </Text>
+      </View>
+    );
+  }
+
+  if (!listo) {
     return (
       <View style={styles.loading}>
         <ActivityIndicator size="large" color="#2563eb" />
@@ -44,5 +84,25 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#f5f5f5',
+    padding: 24,
+  },
+  errorTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#dc2626',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  errorMsg: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  errorHint: {
+    fontSize: 13,
+    color: '#2563eb',
+    textAlign: 'center',
+    lineHeight: 20,
   },
 });

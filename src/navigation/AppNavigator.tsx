@@ -1,19 +1,15 @@
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Text, TouchableOpacity } from 'react-native';
-import { supabase } from '../lib/supabase';
-import LoginScreen from '../screens/LoginScreen';
+import { Text } from 'react-native';
 import POSScreen from '../screens/POSScreen';
 import ProductosScreen from '../screens/ProductosScreen';
 import InventarioScreen from '../screens/InventarioScreen';
 import ResumenVentasScreen from '../screens/ResumenVentasScreen';
 import CortesCajaScreen from '../screens/CortesCajaScreen';
-import type { RootStackParamList, MainTabParamList } from '../types';
+import type { MainTabParamList } from '../types';
 
-const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
-function MainTabs() {
+export default function AppNavigator() {
   return (
     <Tab.Navigator
       screenOptions={{
@@ -28,7 +24,7 @@ function MainTabs() {
         component={POSScreen}
         options={{
           tabBarLabel: 'Venta',
-          tabBarIcon: ({ color, size }) => <Text style={{ fontSize: 20 }}>🛒</Text>,
+          tabBarIcon: () => <Text style={{ fontSize: 20 }}>🛒</Text>,
         }}
       />
       <Tab.Screen
@@ -36,7 +32,7 @@ function MainTabs() {
         component={ProductosScreen}
         options={{
           tabBarLabel: 'Productos',
-          tabBarIcon: ({ color, size }) => <Text style={{ fontSize: 20 }}>📦</Text>,
+          tabBarIcon: () => <Text style={{ fontSize: 20 }}>📦</Text>,
         }}
       />
       <Tab.Screen
@@ -44,7 +40,7 @@ function MainTabs() {
         component={InventarioScreen}
         options={{
           tabBarLabel: 'Inventario',
-          tabBarIcon: ({ color, size }) => <Text style={{ fontSize: 20 }}>📊</Text>,
+          tabBarIcon: () => <Text style={{ fontSize: 20 }}>📊</Text>,
         }}
       />
       <Tab.Screen
@@ -52,7 +48,7 @@ function MainTabs() {
         component={ResumenVentasScreen}
         options={{
           tabBarLabel: 'Resumen',
-          tabBarIcon: ({ color, size }) => <Text style={{ fontSize: 20 }}>📈</Text>,
+          tabBarIcon: () => <Text style={{ fontSize: 20 }}>📈</Text>,
         }}
       />
       <Tab.Screen
@@ -60,18 +56,9 @@ function MainTabs() {
         component={CortesCajaScreen}
         options={{
           tabBarLabel: 'Caja',
-          tabBarIcon: ({ color, size }) => <Text style={{ fontSize: 20 }}>💰</Text>,
+          tabBarIcon: () => <Text style={{ fontSize: 20 }}>💰</Text>,
         }}
       />
     </Tab.Navigator>
-  );
-}
-
-export default function AppNavigator() {
-  return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="Login" component={LoginScreen} />
-      <Stack.Screen name="Main" component={MainTabs} />
-    </Stack.Navigator>
   );
 }
