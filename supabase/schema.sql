@@ -87,6 +87,17 @@ CREATE TABLE IF NOT EXISTS inventario_movimientos (
   created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
+-- MOVIMIENTOS DE CAJA (entradas y salidas de efectivo)
+CREATE TABLE IF NOT EXISTS caja_movimientos (
+  id         UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+  sesion_id  UUID         NOT NULL REFERENCES sesiones_caja(id) ON DELETE CASCADE,
+  tipo       VARCHAR(20)  NOT NULL CHECK (tipo IN ('entrada', 'salida')),
+  monto      NUMERIC(14,2) NOT NULL,
+  motivo     VARCHAR(255),
+  usuario_id UUID         REFERENCES perfiles(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
 -- ============================================================
 -- TRIGGER: updated_at automático
 -- ============================================================
@@ -113,6 +124,7 @@ CREATE INDEX IF NOT EXISTS idx_ventas_fecha         ON ventas(created_at);
 CREATE INDEX IF NOT EXISTS idx_venta_detalles_venta ON venta_detalles(venta_id);
 CREATE INDEX IF NOT EXISTS idx_movimientos_producto ON inventario_movimientos(producto_id);
 CREATE INDEX IF NOT EXISTS idx_movimientos_fecha    ON inventario_movimientos(created_at);
+CREATE INDEX IF NOT EXISTS idx_caja_movimientos_sesion ON caja_movimientos(sesion_id);
 
 -- ============================================================
 -- RLS (Row Level Security)
@@ -124,6 +136,7 @@ ALTER TABLE sesiones_caja ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ventas       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE venta_detalles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE inventario_movimientos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE caja_movimientos ENABLE ROW LEVEL SECURITY;
 
 -- Políticas para usuarios autenticados
 CREATE POLICY "auth_all" ON categorias FOR ALL TO authenticated USING (true) WITH CHECK (true);
@@ -133,6 +146,7 @@ CREATE POLICY "auth_all" ON sesiones_caja FOR ALL TO authenticated USING (true) 
 CREATE POLICY "auth_all" ON ventas FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "auth_all" ON venta_detalles FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "auth_all" ON inventario_movimientos FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "auth_all" ON caja_movimientos FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
 -- ============================================================
 -- DATOS INICIALES

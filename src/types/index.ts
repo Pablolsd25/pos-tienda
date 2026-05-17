@@ -73,6 +73,16 @@ export interface CarritoItem {
   precioCustom?: number; // precio editado manualmente en el carrito
 }
 
+export interface CajaMovimiento {
+  id: string;
+  sesion_id: string;
+  tipo: 'entrada' | 'salida';
+  monto: number;
+  motivo: string | null;
+  usuario_id: string | null;
+  created_at: string;
+}
+
 export type RootStackParamList = {
   Login: undefined;
   Main: undefined;

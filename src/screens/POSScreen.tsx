@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Alert, Modal, ScrollView, RefreshControl } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Alert, Modal, ScrollView, RefreshControl, Platform } from 'react-native';
 import { supabase } from '../lib/supabase';
 import BarcodeScanner from '../components/BarcodeScanner';
 import type { Producto, CarritoItem, SesionCaja, Perfil } from '../types';
@@ -14,6 +14,7 @@ export default function POSScreen() {
   const [perfil, setPerfil] = useState<Perfil | null>(null);
   const [mostrarPago, setMostrarPago] = useState(false);
   const [efectivoRecibido, setEfectivoRecibido] = useState('');
+  const [errorVenta, setErrorVenta] = useState('');
   const [categoriaSeleccionada, setCategoriaSeleccionada] = useState<number | null>(null);
   const [mostrarEscaner, setMostrarEscaner] = useState(false);
   const [editandoPrecioId, setEditandoPrecioId] = useState<string | null>(null);
@@ -172,19 +173,21 @@ export default function POSScreen() {
   const total = subtotal;
 
   const realizarVenta = async () => {
+    setErrorVenta('');
+
     if (carrito.length === 0) {
-      Alert.alert('Error', 'El carrito está vacío');
+      setErrorVenta('El carrito está vacío');
       return;
     }
 
     if (!sesionActual) {
-      Alert.alert('Error', 'No hay una sesión de caja abierta');
+      setErrorVenta('No hay una sesión de caja abierta. Ve a la pestaña Caja y ábrela.');
       return;
     }
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('No hay usuario');
+      if (!user) throw new Error('No hay usuario autenticado');
 
       // Crear venta
       const efectivo = parseFloat(efectivoRecibido) || 0;
@@ -219,14 +222,12 @@ export default function POSScreen() {
           subtotal: precioUnitario * item.cantidad,
         });
 
-        // Actualizar stock si es producto (no servicio)
         if (item.producto.tipo === 'producto') {
           await supabase
             .from('productos')
             .update({ stock_actual: item.producto.stock_actual - item.cantidad })
             .eq('id', item.producto.id);
 
-          // Registrar movimiento
           await supabase.from('inventario_movimientos').insert({
             producto_id: item.producto.id,
             tipo: 'venta',
@@ -237,13 +238,22 @@ export default function POSScreen() {
         }
       }
 
-      Alert.alert('Éxito', `Venta completada. Cambio: $${cambio.toFixed(2)}`);
+      // Venta exitosa
       setCarrito([]);
       setMostrarPago(false);
       setEfectivoRecibido('');
-      loadProductos(); // Recargar para ver stock actualizado
+      setErrorVenta('');
+      loadProductos();
+
+      if (Platform.OS === 'web') {
+        window.alert(`Venta completada. Cambio: $${cambio.toFixed(2)}`);
+      } else {
+        Alert.alert('Éxito', `Venta completada. Cambio: $${cambio.toFixed(2)}`);
+      }
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Error al registrar venta');
+      console.error('Error en venta:', error);
+      const msg = error?.message || error?.details || JSON.stringify(error) || 'Error desconocido';
+      setErrorVenta(msg);
     }
   };
 
@@ -420,12 +430,17 @@ export default function POSScreen() {
               </Text>
             )}
 
+            {errorVenta !== '' && (
+              <Text style={styles.modalError}>{errorVenta}</Text>
+            )}
+
             <View style={styles.modalButtons}>
               <TouchableOpacity
                 style={[styles.modalBtn, styles.modalBtnCancelar]}
                 onPress={() => {
                   setMostrarPago(false);
                   setEfectivoRecibido('');
+                  setErrorVenta('');
                 }}
               >
                 <Text style={styles.modalBtnCancelarText}>Cancelar</Text>
@@ -689,6 +704,15 @@ const styles = StyleSheet.create({
     color: '#16a34a',
     textAlign: 'center',
     marginTop: 12,
+  },
+  modalError: {
+    fontSize: 13,
+    color: '#dc2626',
+    backgroundColor: '#fee2e2',
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 12,
+    textAlign: 'center',
   },
   modalButtons: {
     flexDirection: 'row',
