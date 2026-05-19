@@ -73,6 +73,27 @@ export interface CarritoItem {
   precioCustom?: number; // precio editado manualmente en el carrito
 }
 
+export interface Cliente {
+  id: string;
+  nombre: string;
+  telefono: string | null;
+  notas: string | null;
+  activo: boolean;
+  created_at: string;
+}
+
+export interface Fiado {
+  id: string;
+  cliente_id: string;
+  venta_id: string | null;
+  monto: number;
+  abonado: number;
+  estado: 'pendiente' | 'pagado';
+  nota: string | null;
+  created_at: string;
+  clientes?: Cliente;
+}
+
 export interface CajaMovimiento {
   id: string;
   sesion_id: string;
@@ -99,5 +120,6 @@ export type MainTabParamList = {
   Productos: undefined;
   Inventario: undefined;
   Resumen: undefined;
+  Fiados: undefined;
   Ajustes: undefined;
 };

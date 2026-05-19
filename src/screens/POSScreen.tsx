@@ -1,462 +1,558 @@
 import { useState, useEffect, useCallback } from 'react';
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Alert, Modal, ScrollView, RefreshControl, Platform } from 'react-native';
+import {
+  View, Text, TextInput, TouchableOpacity, FlatList,
+  StyleSheet, Alert, Modal, ScrollView, Platform,
+} from 'react-native';
 import { supabase } from '../lib/supabase';
 import BarcodeScanner from '../components/BarcodeScanner';
-import type { Producto, CarritoItem, SesionCaja, Perfil } from '../types';
+import type { Producto, CarritoItem, SesionCaja, Categoria, Cliente } from '../types';
+
+// ─── Paleta ────────────────────────────────────────────────────────────────────
+const VERDE   = '#16a34a';
+const ROJO    = '#dc2626';
+const OSCURO  = '#0f172a';
+const GRIS    = '#64748b';
+const BG      = '#f1f5f9';
+
+// Un color diferente por cada categoría cargada
+const CAT_COLORS = [
+  '#f59e0b', // amber   – Galletas y Botanas
+  '#3b82f6', // blue    – Bebidas
+  '#ec4899', // pink    – Dulces y Chicles
+  '#10b981', // emerald – Abarrotes
+  '#06b6d4', // cyan    – Limpieza e Higiene
+  '#8b5cf6', // violet  – Varios
+  '#ef4444', // red
+  '#f97316', // orange
+];
 
 export default function POSScreen() {
-  const [productos, setProductos] = useState<Producto[]>([]);
-  const [carrito, setCarrito] = useState<CarritoItem[]>([]);
-  const [busqueda, setBusqueda] = useState('');
-  const [cargando, setCargando] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [sesionActual, setSesionActual] = useState<SesionCaja | null>(null);
-  const [perfil, setPerfil] = useState<Perfil | null>(null);
-  const [mostrarPago, setMostrarPago] = useState(false);
+  const [productos, setProductos]               = useState<Producto[]>([]);
+  const [categorias, setCategorias]             = useState<Categoria[]>([]);
+  const [carrito, setCarrito]                   = useState<CarritoItem[]>([]);
+  const [busqueda, setBusqueda]                 = useState('');
+  const [cargando, setCargando]                 = useState(true);
+  const [sesionActual, setSesionActual]         = useState<SesionCaja | null>(null);
+  const [mostrarPago, setMostrarPago]           = useState(false);
   const [efectivoRecibido, setEfectivoRecibido] = useState('');
-  const [errorVenta, setErrorVenta] = useState('');
-  const [categoriaSeleccionada, setCategoriaSeleccionada] = useState<number | null>(null);
-  const [mostrarEscaner, setMostrarEscaner] = useState(false);
+  const [errorVenta, setErrorVenta]             = useState('');
+  const [categoriaFiltro, setCategoriaFiltro]   = useState<number | null>(null);
+  const [mostrarEscaner, setMostrarEscaner]     = useState(false);
   const [editandoPrecioId, setEditandoPrecioId] = useState<string | null>(null);
-  const [precioEditando, setPrecioEditando] = useState('');
+  const [precioEditando, setPrecioEditando]     = useState('');
+  const [carritoAbierto, setCarritoAbierto]     = useState(false);
 
+  // ── Fiado ──
+  const [modoPago, setModoPago]                 = useState<'efectivo' | 'fiado'>('efectivo');
+  const [clientes, setClientes]                 = useState<Cliente[]>([]);
+  const [clienteFiado, setClienteFiado]         = useState<Cliente | null>(null);
+  const [busquedaCliente, setBusquedaCliente]   = useState('');
+  const [mostrarSelector, setMostrarSelector]   = useState(false);
+
+  // ─── Color por categoría ────────────────────────────────────────────────────
+  const getCatColor = (catId: number | null): string => {
+    if (!catId) return '#94a3b8';
+    const idx = categorias.findIndex(c => c.id === catId);
+    return CAT_COLORS[idx >= 0 ? idx % CAT_COLORS.length : 0];
+  };
+
+  // ─── Carga ──────────────────────────────────────────────────────────────────
   const loadProductos = useCallback(async () => {
     try {
       const { data, error } = await supabase
-        .from('productos')
-        .select('*')
-        .eq('activo', true)
-        .order('nombre');
-
+        .from('productos').select('*').eq('activo', true).order('nombre');
       if (error) throw error;
       setProductos(data || []);
-    } catch (error) {
-      console.error('Error cargando productos:', error);
-    } finally {
-      setCargando(false);
-      setRefreshing(false);
-    }
+    } catch (e) { console.error(e); }
+    finally { setCargando(false); }
   }, []);
 
-  const loadSesionCaja = useCallback(async () => {
+  const loadCategorias = useCallback(async () => {
+    const { data } = await supabase.from('categorias').select('*').order('nombre');
+    setCategorias(data || []);
+  }, []);
+
+  const loadSesion = useCallback(async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-
       const { data } = await supabase
-        .from('sesiones_caja')
-        .select('*')
-        .eq('usuario_id', user.id)
-        .eq('estado', 'abierta')
-        .order('fecha_apertura', { ascending: false })
-        .limit(1)
-        .single();
-
+        .from('sesiones_caja').select('*')
+        .eq('usuario_id', user.id).eq('estado', 'abierta')
+        .order('fecha_apertura', { ascending: false }).limit(1).single();
       setSesionActual(data || null);
-
-      const { data: perfilData } = await supabase
-        .from('perfiles')
-        .select('*')
-        .eq('id', user.id)
-        .single();
-
-      setPerfil(perfilData || null);
-    } catch (error) {
-      console.log('No hay sesión de caja abierta');
-    }
+    } catch { setSesionActual(null); }
   }, []);
 
   useEffect(() => {
-    loadProductos();
-    loadSesionCaja();
-  }, [loadProductos, loadSesionCaja]);
+    loadProductos(); loadCategorias(); loadSesion(); loadClientes();
+  }, [loadProductos, loadCategorias, loadSesion]);
 
-  const onRefresh = () => {
-    setRefreshing(true);
-    loadProductos();
-    loadSesionCaja();
+  const loadClientes = async () => {
+    const { data } = await supabase
+      .from('clientes').select('*').eq('activo', true).order('nombre');
+    setClientes(data || []);
   };
 
-  const handleBarcodeScan = async (codigo: string) => {
-    setMostrarEscaner(false);
-    const codigoLimpio = codigo.trim();
-
-    // 1. Buscar primero en la lista ya cargada en memoria (rápido)
-    const enMemoria = productos.find(p => p.codigo_barra?.trim() === codigoLimpio);
-    if (enMemoria) {
-      agregarAlCarrito(enMemoria);
-      Alert.alert('Producto agregado', enMemoria.nombre);
-      return;
-    }
-
-    // 2. Si no está en memoria, buscar directo en Supabase
-    //    (cubre el caso donde se guardó el producto después de cargar la pantalla)
-    try {
-      const { data, error } = await supabase
-        .from('productos')
-        .select('*')
-        .eq('codigo_barra', codigoLimpio)
-        .eq('activo', true)
-        .maybeSingle();
-
-      if (data) {
-        // Actualizar la lista en memoria para futuros escaneos
-        setProductos(prev => {
-          const yaExiste = prev.find(p => p.id === data.id);
-          return yaExiste ? prev : [...prev, data];
-        });
-        agregarAlCarrito(data);
-        Alert.alert('Producto agregado', data.nombre);
-      } else {
-        setBusqueda(codigoLimpio);
-        Alert.alert(
-          'Código no encontrado',
-          `No hay producto con código:\n${codigoLimpio}\n\nVerifica que el producto esté guardado con ese código en la pantalla Productos.`
-        );
-      }
-    } catch (err) {
-      Alert.alert('Error', 'No se pudo consultar la base de datos.');
-    }
-  };
-
+  // ─── Filtros ────────────────────────────────────────────────────────────────
   const productosFiltrados = productos.filter(p => {
-    const coincideBusqueda = p.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
-      p.codigo_barra?.includes(busqueda);
-    const coincideCategoria = categoriaSeleccionada ? p.categoria_id === categoriaSeleccionada : true;
-    return coincideBusqueda && coincideCategoria;
+    const textoOk = p.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
+      (p.codigo_barra ?? '').includes(busqueda);
+    const catOk = categoriaFiltro ? p.categoria_id === categoriaFiltro : true;
+    return textoOk && catOk;
   });
 
-  const agregarAlCarrito = (producto: Producto) => {
-    const existente = carrito.find(item => item.producto.id === producto.id);
-    if (existente) {
-      setCarrito(carrito.map(item =>
-        item.producto.id === producto.id
-          ? { ...item, cantidad: item.cantidad + 1 }
-          : item
-      ));
-    } else {
-      setCarrito([...carrito, { producto, cantidad: 1 }]);
-    }
-  };
-
-  const actualizarCantidad = (productoId: string, delta: number) => {
-    setCarrito(carrito.map(item => {
-      if (item.producto.id === productoId) {
-        const nuevaCantidad = Math.max(0, item.cantidad + delta);
-        return { ...item, cantidad: nuevaCantidad };
+  // ─── Escáner ─────────────────────────────────────────────────────────────────
+  const handleBarcodeScan = async (codigo: string) => {
+    setMostrarEscaner(false);
+    const c = codigo.trim();
+    const local = productos.find(p => p.codigo_barra?.trim() === c);
+    if (local) { agregarAlCarrito(local); Alert.alert('Agregado', local.nombre); return; }
+    try {
+      const { data } = await supabase
+        .from('productos').select('*').eq('codigo_barra', c).eq('activo', true).maybeSingle();
+      if (data) {
+        setProductos(prev => prev.find(p => p.id === data.id) ? prev : [...prev, data]);
+        agregarAlCarrito(data);
+        Alert.alert('Agregado', data.nombre);
+      } else {
+        setBusqueda(c);
+        Alert.alert('No encontrado', `Código: ${c}`);
       }
-      return item;
-    }).filter(item => item.cantidad > 0));
+    } catch { Alert.alert('Error', 'No se pudo consultar la base de datos.'); }
   };
 
-  const quitarDelCarrito = (productoId: string) => {
-    setCarrito(carrito.filter(item => item.producto.id !== productoId));
+  // ─── Carrito ─────────────────────────────────────────────────────────────────
+  const agregarAlCarrito = (producto: Producto) => {
+    setCarrito(prev => {
+      const ex = prev.find(i => i.producto.id === producto.id);
+      if (ex) return prev.map(i => i.producto.id === producto.id ? { ...i, cantidad: i.cantidad + 1 } : i);
+      return [...prev, { producto, cantidad: 1 }];
+    });
+    setCarritoAbierto(true); // abre el carrito al agregar
   };
 
-  const aplicarPrecioCustom = (productoId: string) => {
-    const nuevo = parseFloat(precioEditando);
-    if (!isNaN(nuevo) && nuevo >= 0) {
-      setCarrito(carrito.map(item =>
-        item.producto.id === productoId
-          ? { ...item, precioCustom: nuevo }
-          : item
-      ));
-    }
-    setEditandoPrecioId(null);
-    setPrecioEditando('');
+  const actualizarCantidad = (id: string, delta: number) => {
+    setCarrito(prev =>
+      prev.map(i => i.producto.id === id ? { ...i, cantidad: Math.max(0, i.cantidad + delta) } : i)
+          .filter(i => i.cantidad > 0)
+    );
   };
 
-  const subtotal = carrito.reduce((acc, item) => {
-    const precio = item.precioCustom ?? item.producto.precio;
-    return acc + precio * item.cantidad;
-  }, 0);
-  const total = subtotal;
+  const quitarItem = (id: string) => setCarrito(prev => prev.filter(i => i.producto.id !== id));
 
+  const aplicarPrecioCustom = (id: string) => {
+    const n = parseFloat(precioEditando);
+    if (!isNaN(n) && n >= 0)
+      setCarrito(prev => prev.map(i => i.producto.id === id ? { ...i, precioCustom: n } : i));
+    setEditandoPrecioId(null); setPrecioEditando('');
+  };
+
+  const total = carrito.reduce((s, i) => s + (i.precioCustom ?? i.producto.precio) * i.cantidad, 0);
+
+  // ─── Venta ───────────────────────────────────────────────────────────────────
   const realizarVenta = async () => {
     setErrorVenta('');
-
-    if (carrito.length === 0) {
-      setErrorVenta('El carrito está vacío');
-      return;
-    }
-
-    if (!sesionActual) {
-      setErrorVenta('No hay una sesión de caja abierta. Ve a la pestaña Caja y ábrela.');
-      return;
-    }
-
+    if (carrito.length === 0) { setErrorVenta('El carrito está vacío'); return; }
+    if (!sesionActual) { setErrorVenta('No hay caja abierta. Ve a la pestaña Caja.'); return; }
+    if (modoPago === 'fiado' && !clienteFiado) { setErrorVenta('Selecciona un cliente para el fiado'); return; }
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('No hay usuario autenticado');
-
-      // Crear venta
-      const efectivo = parseFloat(efectivoRecibido) || 0;
-      const cambio = Math.max(0, efectivo - total);
-
-      const { data: venta, error: ventaError } = await supabase
-        .from('ventas')
-        .insert({
-          sesion_id: sesionActual.id,
-          usuario_id: user.id,
-          subtotal: total,
-          descuento: 0,
-          total: total,
-          efectivo: efectivo,
-          cambio: cambio,
-          metodo_pago: efectivo > 0 ? 'efectivo' : 'tarjeta',
+      if (!user) throw new Error('Sin usuario autenticado');
+      const esFiado  = modoPago === 'fiado';
+      const efectivo = esFiado ? 0 : (parseFloat(efectivoRecibido) || 0);
+      const cambio   = esFiado ? 0 : Math.max(0, efectivo - total);
+      const { data: venta, error: ve } = await supabase
+        .from('ventas').insert({
+          sesion_id: sesionActual.id, usuario_id: user.id,
+          subtotal: total, descuento: 0, total, efectivo, cambio,
+          metodo_pago: esFiado ? 'mixto' : (efectivo > 0 ? 'efectivo' : 'tarjeta'),
           estado: 'completada',
-        })
-        .select()
-        .single();
-
-      if (ventaError) throw ventaError;
-
-      // Crear detalles y actualizar inventario
+          nota: esFiado ? `Fiado: ${clienteFiado?.nombre}` : null,
+        }).select().single();
+      if (ve) throw ve;
       for (const item of carrito) {
-        const precioUnitario = item.precioCustom ?? item.producto.precio;
+        const pu = item.precioCustom ?? item.producto.precio;
         await supabase.from('venta_detalles').insert({
-          venta_id: venta.id,
-          producto_id: item.producto.id,
-          cantidad: item.cantidad,
-          precio_unitario: precioUnitario,
-          subtotal: precioUnitario * item.cantidad,
+          venta_id: venta.id, producto_id: item.producto.id,
+          cantidad: item.cantidad, precio_unitario: pu, subtotal: pu * item.cantidad,
         });
-
         if (item.producto.tipo === 'producto') {
-          await supabase
-            .from('productos')
+          await supabase.from('productos')
             .update({ stock_actual: item.producto.stock_actual - item.cantidad })
             .eq('id', item.producto.id);
-
           await supabase.from('inventario_movimientos').insert({
-            producto_id: item.producto.id,
-            tipo: 'venta',
-            cantidad: -item.cantidad,
-            motivo: `Venta #${venta.id.slice(0, 8)}`,
-            usuario_id: user.id,
+            producto_id: item.producto.id, tipo: 'venta',
+            cantidad: -item.cantidad, motivo: `Venta #${venta.id.slice(0, 8)}`, usuario_id: user.id,
           });
         }
       }
-
-      // Venta exitosa
-      setCarrito([]);
-      setMostrarPago(false);
-      setEfectivoRecibido('');
-      setErrorVenta('');
-      loadProductos();
-
-      if (Platform.OS === 'web') {
-        window.alert(`Venta completada. Cambio: $${cambio.toFixed(2)}`);
-      } else {
-        Alert.alert('Éxito', `Venta completada. Cambio: $${cambio.toFixed(2)}`);
+      // Si es fiado → crear registro en tabla fiados
+      if (esFiado && clienteFiado) {
+        const descripcion = carrito
+          .map(i => `${i.cantidad > 1 ? i.cantidad + 'x ' : ''}${i.producto.nombre}`)
+          .join(', ');
+        await supabase.from('fiados').insert({
+          cliente_id: clienteFiado.id,
+          venta_id: venta.id,
+          monto: total,
+          abonado: 0,
+          estado: 'pendiente',
+          nota: descripcion,
+        });
       }
-    } catch (error: any) {
-      console.error('Error en venta:', error);
-      const msg = error?.message || error?.details || JSON.stringify(error) || 'Error desconocido';
-      setErrorVenta(msg);
+      // Reset
+      setCarrito([]); setMostrarPago(false); setEfectivoRecibido('');
+      setCarritoAbierto(false); setModoPago('efectivo');
+      setClienteFiado(null); setBusquedaCliente('');
+      loadProductos();
+      const msg = esFiado
+        ? `Fiado registrado a ${clienteFiado?.nombre}\nTotal: $${total.toFixed(2)}`
+        : `Venta completada\nCambio: $${cambio.toFixed(2)}`;
+      if (Platform.OS === 'web') window.alert(msg);
+      else Alert.alert('Listo', msg);
+    } catch (err: any) {
+      setErrorVenta(err?.message || JSON.stringify(err) || 'Error desconocido');
     }
   };
 
-  const abrirCaja = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('No hay usuario');
-
-      const { data, error } = await supabase
-        .from('sesiones_caja')
-        .insert({
-          usuario_id: user.id,
-          saldo_inicial: 0,
-          estado: 'abierta',
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
-      setSesionActual(data);
-      Alert.alert('Éxito', 'Caja abierta');
-    } catch (error: any) {
-      Alert.alert('Error', error.message || 'Error al abrir caja');
-    }
-  };
-
-  const renderProducto = ({ item }: { item: Producto }) => (
-    <TouchableOpacity
-      style={styles.productoCard}
-      onPress={() => agregarAlCarrito(item)}
-    >
-      <Text style={styles.productoNombre}>{item.nombre}</Text>
-      <Text style={styles.productoPrecio}>${item.precio.toFixed(2)}</Text>
-      {item.tipo === 'producto' && (
-        <Text style={[styles.productoStock, item.stock_actual <= item.stock_minimo && styles.stockBajo]}>
-          Stock: {item.stock_actual}
-        </Text>
-      )}
-    </TouchableOpacity>
-  );
-
-  const renderCarritoItem = ({ item }: { item: CarritoItem }) => {
-    const precio = item.precioCustom ?? item.producto.precio;
-    const editando = editandoPrecioId === item.producto.id;
+  // ─── Render producto (3 columnas, compacto) ───────────────────────────────────
+  const renderProducto = ({ item }: { item: Producto }) => {
+    const sinStock   = item.tipo === 'producto' && item.stock_actual === 0;
+    const sinPrecio  = item.precio === 0;
+    const catColor   = getCatColor(item.categoria_id);
 
     return (
-      <View style={styles.carritoItem}>
-        <View style={styles.carritoInfo}>
-          <Text style={styles.carritoNombre}>{item.producto.nombre}</Text>
+      <TouchableOpacity
+        style={[styles.card, { borderTopColor: catColor, borderTopWidth: 3 }]}
+        onPress={() => agregarAlCarrito(item)}
+        activeOpacity={0.65}
+      >
+        {sinStock && (
+          <View style={styles.agotadoBadge}>
+            <Text style={styles.agotadoText}>Agotado</Text>
+          </View>
+        )}
+        <Text style={styles.cardNombre} numberOfLines={2}>
+          {item.nombre}
+        </Text>
+        <Text style={[
+          styles.cardPrecio,
+          sinPrecio && styles.cardPrecioLibre,
+        ]}>
+          {sinPrecio ? 'Precio libre' : `$${item.precio.toFixed(2)}`}
+        </Text>
+      </TouchableOpacity>
+    );
+  };
+
+  // ─── Render item carrito ──────────────────────────────────────────────────────
+  const renderCarritoItem = ({ item }: { item: CarritoItem }) => {
+    const precio   = item.precioCustom ?? item.producto.precio;
+    const editando = editandoPrecioId === item.producto.id;
+    return (
+      <View style={styles.ciRow}>
+        <TouchableOpacity style={styles.ciQuitar} onPress={() => quitarItem(item.producto.id)}>
+          <Text style={styles.ciQuitarText}>✕</Text>
+        </TouchableOpacity>
+        <View style={styles.ciInfo}>
+          <Text style={styles.ciNombre} numberOfLines={1}>{item.producto.nombre}</Text>
           {editando ? (
             <TextInput
-              style={styles.precioInput}
-              value={precioEditando}
-              onChangeText={setPrecioEditando}
-              keyboardType="decimal-pad"
-              autoFocus
-              selectTextOnFocus
+              style={styles.ciPrecioInput}
+              value={precioEditando} onChangeText={setPrecioEditando}
+              keyboardType="decimal-pad" autoFocus selectTextOnFocus
               onBlur={() => aplicarPrecioCustom(item.producto.id)}
               onSubmitEditing={() => aplicarPrecioCustom(item.producto.id)}
             />
           ) : (
-            <TouchableOpacity onPress={() => {
-              setEditandoPrecioId(item.producto.id);
-              setPrecioEditando(precio.toString());
-            }}>
-              <Text style={[styles.carritoPrecio, item.precioCustom !== undefined && styles.precioEditado]}>
-                ${precio.toFixed(2)} c/u {item.precioCustom !== undefined ? '(editado)' : '(toca para editar)'}
+            <TouchableOpacity onPress={() => { setEditandoPrecioId(item.producto.id); setPrecioEditando(precio.toString()); }}>
+              <Text style={[styles.ciPrecio, item.precioCustom !== undefined && styles.ciPrecioEditado]}>
+                ${precio.toFixed(2)}{item.precioCustom !== undefined ? ' ✎' : ''}
               </Text>
             </TouchableOpacity>
           )}
         </View>
-        <View style={styles.carritoCantidad}>
-          <TouchableOpacity onPress={() => actualizarCantidad(item.producto.id, -1)} style={styles.btnCantidad}>
-            <Text style={styles.btnCantidadText}>-</Text>
+        <View style={styles.ciControles}>
+          <TouchableOpacity style={styles.ciBtn} onPress={() => actualizarCantidad(item.producto.id, -1)}>
+            <Text style={styles.ciBtnText}>−</Text>
           </TouchableOpacity>
-          <Text style={styles.cantidadText}>{item.cantidad}</Text>
-          <TouchableOpacity onPress={() => actualizarCantidad(item.producto.id, 1)} style={styles.btnCantidad}>
-            <Text style={styles.btnCantidadText}>+</Text>
+          <Text style={styles.ciCant}>{item.cantidad}</Text>
+          <TouchableOpacity style={styles.ciBtn} onPress={() => actualizarCantidad(item.producto.id, 1)}>
+            <Text style={styles.ciBtnText}>+</Text>
           </TouchableOpacity>
         </View>
-        <Text style={styles.carritoSubtotal}>${(precio * item.cantidad).toFixed(2)}</Text>
-        <TouchableOpacity onPress={() => quitarDelCarrito(item.producto.id)}>
-          <Text style={styles.btnQuitar}>✕</Text>
-        </TouchableOpacity>
+        <Text style={styles.ciSub}>${(precio * item.cantidad).toFixed(2)}</Text>
       </View>
     );
   };
 
+  // ─── UI ───────────────────────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
-      {/* Header */}
+
+      {/* HEADER */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Punto de Venta</Text>
-        <View style={styles.headerStatus}>
-          <Text style={styles.headerStatusText}>
-            {sesionActual ? '✓ Caja abierta' : '✕ Caja cerrada'}
-          </Text>
+        <View style={[styles.cajaBadge, sesionActual ? styles.cajaBadgeOpen : styles.cajaBadgeClosed]}>
+          <Text style={styles.cajaBadgeText}>{sesionActual ? '● Caja abierta' : '● Caja cerrada'}</Text>
         </View>
       </View>
 
-      {/* Barra de búsqueda */}
-      <View style={styles.searchContainer}>
+      {/* BÚSQUEDA */}
+      <View style={styles.searchRow}>
         <TextInput
           style={styles.searchInput}
-          placeholder="Buscar producto o código..."
+          placeholder="Buscar producto..."
+          placeholderTextColor="#94a3b8"
           value={busqueda}
           onChangeText={setBusqueda}
         />
-        <TouchableOpacity
-          style={styles.btnEscanear}
-          onPress={() => setMostrarEscaner(true)}
-        >
-          <Text style={styles.btnEscanearText}>Escanear</Text>
+        <TouchableOpacity style={styles.btnScan} onPress={() => setMostrarEscaner(true)}>
+          <Text style={styles.btnScanIcon}>📷</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Lista de productos */}
+      {/* CATEGORÍAS */}
+      {categorias.length > 0 && (
+        <View style={styles.catBarWrapper}>
+          <ScrollView
+            horizontal showsHorizontalScrollIndicator={false}
+            style={styles.catBar} contentContainerStyle={styles.catBarContent}
+          >
+          {/* Todos */}
+          <TouchableOpacity
+            style={[styles.catPill, categoriaFiltro === null && styles.catPillActive]}
+            onPress={() => setCategoriaFiltro(null)}
+          >
+            <Text style={[styles.catPillText, categoriaFiltro === null && styles.catPillTextActive]}>
+              Todos
+            </Text>
+          </TouchableOpacity>
+          {categorias.map((cat, idx) => {
+            const color = CAT_COLORS[idx % CAT_COLORS.length];
+            const active = categoriaFiltro === cat.id;
+            return (
+              <TouchableOpacity
+                key={cat.id}
+                style={[styles.catPill, active ? { backgroundColor: color, borderColor: color } : { borderColor: color }]}
+                onPress={() => setCategoriaFiltro(active ? null : cat.id)}
+              >
+                <Text style={[styles.catPillText, active ? styles.catPillTextActive : { color }]}>
+                  {cat.nombre}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+        </View>
+      )}
+
+      {/* GRID DE PRODUCTOS — 3 columnas */}
       <FlatList
         data={productosFiltrados}
         renderItem={renderProducto}
         keyExtractor={item => item.id}
-        numColumns={2}
-        contentContainerStyle={styles.productosGrid}
-        refreshing={refreshing}
-        onRefresh={onRefresh}
+        numColumns={3}
+        key="3col"
+        contentContainerStyle={styles.grid}
         ListEmptyComponent={
-          <Text style={styles.emptyText}>
-            {cargando ? 'Cargando productos...' : 'No hay productos'}
-          </Text>
+          <Text style={styles.emptyText}>{cargando ? 'Cargando...' : 'No hay productos'}</Text>
         }
       />
 
-      {/* Carrito */}
+      {/* CARRITO (barra fija + lista desplegable) */}
       {carrito.length > 0 && (
-        <View style={styles.carritoContainer}>
-          <View style={styles.carritoHeader}>
-            <Text style={styles.carritoTitle}>Carrito ({carrito.length} items)</Text>
-            <Text style={styles.carritoTotal}>Total: ${total.toFixed(2)}</Text>
+        <View style={styles.carritoWrapper}>
+          {/* Items del carrito — desplegable */}
+          {carritoAbierto && (
+            <View style={styles.carritoLista}>
+              <FlatList
+                data={carrito}
+                renderItem={renderCarritoItem}
+                keyExtractor={i => i.producto.id}
+                style={{ maxHeight: 220 }}
+                showsVerticalScrollIndicator={false}
+              />
+            </View>
+          )}
+
+          {/* Barra inferior fija */}
+          <View style={styles.carritoBarra}>
+            <TouchableOpacity
+              style={styles.carritoToggle}
+              onPress={() => setCarritoAbierto(p => !p)}
+            >
+              <Text style={styles.carritoToggleIcon}>{carritoAbierto ? '▼' : '▲'}</Text>
+              <Text style={styles.carritoToggleLabel}>
+                {carrito.length} {carrito.length === 1 ? 'artículo' : 'artículos'}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.btnCobrar, !sesionActual && styles.btnCobrarOff]}
+              onPress={() => {
+                if (!sesionActual) { Alert.alert('Caja cerrada', 'Ve a la pestaña Caja y ábrela.'); return; }
+                setMostrarPago(true);
+              }}
+            >
+              <Text style={styles.btnCobrarText}>Cobrar  ${total.toFixed(2)}</Text>
+            </TouchableOpacity>
           </View>
-          <FlatList
-            data={carrito}
-            renderItem={renderCarritoItem}
-            keyExtractor={item => item.producto.id}
-            style={styles.carritoList}
-          />
-          <TouchableOpacity
-            style={styles.btnCobrar}
-            onPress={() => setMostrarPago(true)}
-          >
-            <Text style={styles.btnCobrarText}>Cobrar ${total.toFixed(2)}</Text>
-          </TouchableOpacity>
         </View>
       )}
 
-      {/* Modal de pago */}
+      {/* MODAL PAGO */}
       <Modal visible={mostrarPago} transparent animationType="slide">
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Finalizar Venta</Text>
-            <Text style={styles.modalTotal}>Total: ${total.toFixed(2)}</Text>
+          <View style={styles.modalBox}>
+            <Text style={styles.modalTitulo}>Finalizar Venta</Text>
 
-            <Text style={styles.modalLabel}>Efectivo recibido:</Text>
-            <TextInput
-              style={styles.modalInput}
-              keyboardType="decimal-pad"
-              value={efectivoRecibido}
-              onChangeText={setEfectivoRecibido}
-              placeholder="0.00"
-            />
+            {/* Total */}
+            <View style={styles.modalTotalBox}>
+              <Text style={styles.modalTotalLabel}>Total a cobrar</Text>
+              <Text style={styles.modalTotalValor}>${total.toFixed(2)}</Text>
+            </View>
 
-            {efectivoRecibido && (
-              <Text style={styles.modalCambio}>
-                Cambio: ${(Math.max(0, parseFloat(efectivoRecibido) - total)).toFixed(2)}
-              </Text>
+            {/* Toggle Efectivo / Fiado */}
+            <View style={styles.modoPagoRow}>
+              <TouchableOpacity
+                style={[styles.modoPagoBtn, modoPago === 'efectivo' && styles.modoPagoBtnActive]}
+                onPress={() => setModoPago('efectivo')}
+              >
+                <Text style={[styles.modoPagoBtnText, modoPago === 'efectivo' && styles.modoPagoBtnTextActive]}>
+                  Efectivo
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modoPagoBtn, modoPago === 'fiado' && { ...styles.modoPagoBtnActive, backgroundColor: ROJO, borderColor: ROJO }]}
+                onPress={() => setModoPago('fiado')}
+              >
+                <Text style={[styles.modoPagoBtnText, modoPago === 'fiado' && styles.modoPagoBtnTextActive]}>
+                  Fiado
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Efectivo: campo de monto */}
+            {modoPago === 'efectivo' && (
+              <>
+                <Text style={styles.modalLabel}>Efectivo recibido</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  keyboardType="decimal-pad"
+                  value={efectivoRecibido}
+                  onChangeText={setEfectivoRecibido}
+                  placeholder="0.00"
+                  placeholderTextColor="#94a3b8"
+                  autoFocus
+                />
+                {efectivoRecibido !== '' && (
+                  <View style={styles.modalCambioBox}>
+                    <Text style={styles.modalCambioLabel}>Cambio</Text>
+                    <Text style={styles.modalCambioValor}>
+                      ${Math.max(0, parseFloat(efectivoRecibido || '0') - total).toFixed(2)}
+                    </Text>
+                  </View>
+                )}
+              </>
             )}
 
+            {/* Fiado: selector de cliente */}
+            {modoPago === 'fiado' && (
+              <>
+                <Text style={styles.modalLabel}>Cliente que fía</Text>
+                <TouchableOpacity
+                  style={[styles.modalInput, { justifyContent: 'center' }]}
+                  onPress={() => setMostrarSelector(true)}
+                >
+                  <Text style={{ color: clienteFiado ? '#0f172a' : '#94a3b8', fontSize: 15 }}>
+                    {clienteFiado ? clienteFiado.nombre : 'Seleccionar cliente...'}
+                  </Text>
+                </TouchableOpacity>
+                {!clienteFiado && (
+                  <Text style={styles.fiadoHint}>
+                    Si es cliente nuevo, agrégalo primero en la pestaña Fiados.
+                  </Text>
+                )}
+              </>
+            )}
+
+            {/* Error */}
             {errorVenta !== '' && (
               <Text style={styles.modalError}>{errorVenta}</Text>
             )}
 
-            <View style={styles.modalButtons}>
+            {/* Botones */}
+            <View style={styles.modalBtns}>
               <TouchableOpacity
-                style={[styles.modalBtn, styles.modalBtnCancelar]}
+                style={[styles.modalBtn, { backgroundColor: '#f1f5f9' }]}
                 onPress={() => {
-                  setMostrarPago(false);
-                  setEfectivoRecibido('');
-                  setErrorVenta('');
+                  setMostrarPago(false); setEfectivoRecibido(''); setErrorVenta('');
+                  setModoPago('efectivo'); setClienteFiado(null); setBusquedaCliente('');
                 }}
               >
-                <Text style={styles.modalBtnCancelarText}>Cancelar</Text>
+                <Text style={[styles.modalBtnText, { color: GRIS }]}>Cancelar</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.modalBtn, styles.modalBtnAceptar]}
+                style={[styles.modalBtn, { backgroundColor: modoPago === 'fiado' ? ROJO : VERDE }]}
                 onPress={realizarVenta}
               >
-                <Text style={styles.modalBtnAceptarText}>Completar Venta</Text>
+                <Text style={[styles.modalBtnText, { color: '#fff' }]}>
+                  {modoPago === 'fiado' ? 'Registrar fiado' : 'Completar venta'}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
 
-      {/* Escaner de codigo de barras */}
+      {/* SELECTOR DE CLIENTE (fiado) */}
+      <Modal visible={mostrarSelector} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalBox, { maxHeight: '75%' }]}>
+            <Text style={styles.modalTitulo}>Seleccionar cliente</Text>
+            <TextInput
+              style={[styles.modalInput, { marginBottom: 10 }]}
+              placeholder="Buscar..."
+              placeholderTextColor="#94a3b8"
+              value={busquedaCliente}
+              onChangeText={setBusquedaCliente}
+              autoFocus
+            />
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {clientes
+                .filter(c => c.nombre.toLowerCase().includes(busquedaCliente.toLowerCase()))
+                .map(c => (
+                  <TouchableOpacity
+                    key={c.id}
+                    style={styles.clienteOpcion}
+                    onPress={() => {
+                      setClienteFiado(c);
+                      setBusquedaCliente('');
+                      setMostrarSelector(false);
+                    }}
+                  >
+                    <Text style={styles.clienteOpcionNombre}>{c.nombre}</Text>
+                    {c.telefono ? (
+                      <Text style={styles.clienteOpcionTel}>{c.telefono}</Text>
+                    ) : null}
+                  </TouchableOpacity>
+                ))}
+              {clientes.filter(c => c.nombre.toLowerCase().includes(busquedaCliente.toLowerCase())).length === 0 && (
+                <Text style={styles.modalError}>No se encontró el cliente.</Text>
+              )}
+            </ScrollView>
+            <TouchableOpacity
+              style={[styles.modalBtn, { backgroundColor: '#f1f5f9', marginTop: 10 }]}
+              onPress={() => { setMostrarSelector(false); setBusquedaCliente(''); }}
+            >
+              <Text style={[styles.modalBtnText, { color: GRIS }]}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ESCÁNER */}
       <BarcodeScanner
         visible={mostrarEscaner}
         onScan={handleBarcodeScan}
@@ -467,276 +563,306 @@ export default function POSScreen() {
   );
 }
 
+// ─── Estilos ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
+  container: { flex: 1, backgroundColor: BG },
+
+  // ── Header ──
   header: {
-    backgroundColor: '#2563eb',
-    padding: 16,
+    backgroundColor: '#1e40af',
     paddingTop: 48,
-  },
-  headerTitle: {
-    color: '#fff',
-    fontSize: 24,
-    fontWeight: 'bold',
-  },
-  headerStatus: {
+    paddingBottom: 14,
+    paddingHorizontal: 16,
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 8,
+    justifyContent: 'space-between',
   },
-  headerStatusText: {
-    color: '#fff',
-    fontSize: 14,
-  },
-  btnAbrirCaja: {
-    backgroundColor: '#fff',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-    marginLeft: 12,
-  },
-  btnAbrirCajaText: {
-    color: '#2563eb',
-    fontWeight: '600',
-    fontSize: 12,
-  },
-  searchContainer: {
-    padding: 12,
-    backgroundColor: '#fff',
+  headerTitle: { color: '#fff', fontSize: 22, fontWeight: '800', letterSpacing: -0.3 },
+  cajaBadge: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
+  cajaBadgeOpen:   { backgroundColor: '#16a34a' },
+  cajaBadgeClosed: { backgroundColor: '#dc2626' },
+  cajaBadgeText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+
+  // ── Búsqueda ──
+  searchRow: {
     flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
     gap: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e2e8f0',
   },
   searchInput: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
-    borderRadius: 8,
-    padding: 10,
+    backgroundColor: BG,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
     fontSize: 16,
+    color: OSCURO,
   },
-  btnEscanear: {
-    backgroundColor: '#2563eb',
-    borderRadius: 8,
-    paddingHorizontal: 14,
+  btnScan: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: '#1e40af',
+    alignItems: 'center',
     justifyContent: 'center',
+  },
+  btnScanIcon: { fontSize: 22 },
+
+  // ── Categorías ──
+  catBarWrapper: {
+    height: 56,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e2e8f0',
+  },
+  catBar: { flex: 1 },
+  catBarContent: {
+    flexDirection: 'row',
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    gap: 8,
     alignItems: 'center',
   },
-  btnEscanearText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 14,
+  catPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: '#cbd5e1',
+    backgroundColor: 'transparent',
   },
-  productosGrid: {
-    padding: 8,
-  },
-  productoCard: {
+  catPillActive: { backgroundColor: '#1e40af', borderColor: '#1e40af' },
+  catPillText: { fontSize: 13, fontWeight: '600', color: GRIS },
+  catPillTextActive: { color: '#fff' },
+
+  // ── Grid 3 columnas ──
+  grid: { padding: 6, paddingBottom: 10 },
+  card: {
     flex: 1,
-    backgroundColor: '#fff',
     margin: 4,
-    padding: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  productoNombre: {
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  productoPrecio: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#2563eb',
-    marginTop: 4,
-  },
-  productoStock: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 4,
-  },
-  stockBajo: {
-    color: '#dc2626',
-  },
-  emptyText: {
-    textAlign: 'center',
-    color: '#666',
-    marginTop: 20,
-  },
-  carritoContainer: {
     backgroundColor: '#fff',
-    borderTopWidth: 1,
-    borderTopColor: '#e5e5e5',
-    maxHeight: 300,
-  },
-  carritoHeader: {
-    flexDirection: 'row',
+    borderRadius: 10,
+    padding: 10,
+    minHeight: 80,
     justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e5e5',
+    // sombra sutil
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.07,
+    shadowRadius: 3,
+    elevation: 2,
+    overflow: 'hidden',
   },
-  carritoTitle: {
-    fontWeight: '600',
-    fontSize: 16,
+  cardNombre: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: OSCURO,
+    lineHeight: 17,
+    flexShrink: 1,
   },
-  carritoTotal: {
-    fontWeight: 'bold',
-    fontSize: 18,
-    color: '#2563eb',
+  cardPrecio: {
+    fontSize: 17,
+    fontWeight: '900',
+    color: VERDE,
+    marginTop: 4,
   },
-  carritoList: {
-    maxHeight: 150,
-  },
-  carritoItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f5f5f5',
-  },
-  carritoInfo: {
-    flex: 1,
-  },
-  carritoNombre: {
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  carritoPrecio: {
+  cardPrecioLibre: {
     fontSize: 12,
-    color: '#666',
+    color: '#f59e0b',
+    fontWeight: '700',
   },
-  precioEditado: {
-    color: '#d97706',
-    fontWeight: '600',
-  },
-  precioInput: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#2563eb',
-    borderBottomWidth: 1.5,
-    borderBottomColor: '#2563eb',
-    minWidth: 80,
+  agotadoBadge: {
+    position: 'absolute',
+    top: 4, right: 4,
+    backgroundColor: '#fee2e2',
+    borderRadius: 6,
+    paddingHorizontal: 5,
     paddingVertical: 2,
   },
-  carritoCantidad: {
+  agotadoText: { fontSize: 10, fontWeight: '700', color: ROJO },
+  emptyText: { textAlign: 'center', color: GRIS, marginTop: 40, fontSize: 16 },
+
+  // ── Carrito wrapper ──
+  carritoWrapper: {
+    backgroundColor: '#fff',
+    borderTopWidth: 1,
+    borderTopColor: '#e2e8f0',
+    // sombra hacia arriba
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -3 },
+    shadowOpacity: 0.10,
+    shadowRadius: 6,
+    elevation: 10,
+  },
+
+  // Lista items (desplegable)
+  carritoLista: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  ciRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f8fafc',
+    gap: 8,
   },
-  btnCantidad: {
-    width: 28,
-    height: 28,
-    backgroundColor: '#e5e5e5',
-    borderRadius: 14,
+  ciQuitar: { padding: 4 },
+  ciQuitarText: { color: ROJO, fontSize: 15, fontWeight: '700' },
+  ciInfo: { flex: 1 },
+  ciNombre: { fontSize: 14, fontWeight: '600', color: OSCURO },
+  ciPrecio: { fontSize: 12, color: GRIS, marginTop: 1 },
+  ciPrecioEditado: { color: '#f59e0b', fontWeight: '700' },
+  ciPrecioInput: {
+    fontSize: 14, fontWeight: '700', color: '#1e40af',
+    borderBottomWidth: 2, borderBottomColor: '#1e40af',
+    minWidth: 70, paddingVertical: 1,
+  },
+  ciControles: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  ciBtn: {
+    width: 30, height: 30, borderRadius: 15,
+    backgroundColor: BG,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: '#cbd5e1',
+  },
+  ciBtnText: { fontSize: 18, fontWeight: '700', color: OSCURO, lineHeight: 20 },
+  ciCant: { fontSize: 16, fontWeight: '700', color: OSCURO, minWidth: 24, textAlign: 'center' },
+  ciSub: { fontSize: 14, fontWeight: '700', color: OSCURO, minWidth: 52, textAlign: 'right' },
+
+  // Barra inferior
+  carritoBarra: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    paddingBottom: Platform.OS === 'ios' ? 22 : 10,
+    gap: 10,
   },
-  btnCantidadText: {
-    fontSize: 16,
-    fontWeight: 'bold',
+  carritoToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: BG,
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
   },
-  cantidadText: {
-    marginHorizontal: 8,
-    fontSize: 14,
-  },
-  carritoSubtotal: {
-    marginHorizontal: 12,
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  btnQuitar: {
-    color: '#dc2626',
-    fontSize: 16,
-    padding: 4,
-  },
+  carritoToggleIcon: { fontSize: 13, color: GRIS },
+  carritoToggleLabel: { fontSize: 14, fontWeight: '700', color: OSCURO },
   btnCobrar: {
-    backgroundColor: '#16a34a',
-    margin: 12,
-    padding: 14,
-    borderRadius: 8,
+    flex: 1,
+    backgroundColor: VERDE,
+    paddingVertical: 14,
+    borderRadius: 12,
     alignItems: 'center',
   },
-  btnCobrarText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
+  btnCobrarOff: { backgroundColor: '#94a3b8' },
+  btnCobrarText: { color: '#fff', fontSize: 17, fontWeight: '800', letterSpacing: 0.2 },
+
+  // ── Modal pago ──
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    padding: 20,
+    backgroundColor: 'rgba(15,23,42,0.6)',
+    justifyContent: 'flex-end',
   },
-  modalContent: {
+  modalBox: {
     backgroundColor: '#fff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+    paddingBottom: Platform.OS === 'ios' ? 44 : 28,
+  },
+  modalTitulo: { fontSize: 22, fontWeight: '800', color: OSCURO, textAlign: 'center', marginBottom: 16 },
+  modalTotalBox: {
+    backgroundColor: '#eff6ff',
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginBottom: 18,
+  },
+  modalTotalLabel: { fontSize: 13, color: GRIS, fontWeight: '600', marginBottom: 4 },
+  modalTotalValor: { fontSize: 44, fontWeight: '900', color: '#1e40af' },
+  modalLabel: { fontSize: 15, fontWeight: '700', color: '#334155', marginBottom: 8 },
+  modalInput: {
+    borderWidth: 2,
+    borderColor: '#cbd5e1',
     borderRadius: 12,
-    padding: 20,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    fontSize: 28,
     textAlign: 'center',
+    color: OSCURO,
+    marginBottom: 12,
+    backgroundColor: BG,
   },
-  modalTotal: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    color: '#2563eb',
-    marginVertical: 16,
+  modalCambioBox: {
+    backgroundColor: '#f0fdf4',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginBottom: 12,
   },
-  modalLabel: {
+  modalCambioLabel: { fontSize: 13, color: VERDE, fontWeight: '700', marginBottom: 2 },
+  modalCambioValor: { fontSize: 34, fontWeight: '900', color: VERDE },
+  modalError: {
+    backgroundColor: '#fef2f2',
+    color: ROJO,
     fontSize: 14,
     fontWeight: '600',
-    marginBottom: 6,
-  },
-  modalInput: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 20,
     textAlign: 'center',
-  },
-  modalCambio: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#16a34a',
-    textAlign: 'center',
-    marginTop: 12,
-  },
-  modalError: {
-    fontSize: 13,
-    color: '#dc2626',
-    backgroundColor: '#fee2e2',
-    borderRadius: 8,
     padding: 10,
-    marginTop: 12,
+    borderRadius: 10,
+    marginBottom: 12,
+  },
+  modalBtns: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  modalBtn: { flex: 1, paddingVertical: 15, borderRadius: 12, alignItems: 'center' },
+  modalBtnText: { fontSize: 16, fontWeight: '800' },
+
+  // ── Toggle modo pago ──
+  modoPagoRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
+  },
+  modoPagoBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: '#cbd5e1',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+  },
+  modoPagoBtnActive: {
+    backgroundColor: VERDE,
+    borderColor: VERDE,
+  },
+  modoPagoBtnText: { fontSize: 15, fontWeight: '700', color: GRIS },
+  modoPagoBtnTextActive: { color: '#fff' },
+
+  fiadoHint: {
+    fontSize: 12,
+    color: GRIS,
+    marginBottom: 10,
     textAlign: 'center',
   },
-  modalButtons: {
-    flexDirection: 'row',
-    marginTop: 20,
+
+  // ── Selector cliente ──
+  clienteOpcion: {
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
   },
-  modalBtn: {
-    flex: 1,
-    padding: 14,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginHorizontal: 4,
-  },
-  modalBtnCancelar: {
-    backgroundColor: '#f5f5f5',
-  },
-  modalBtnCancelarText: {
-    color: '#666',
-    fontWeight: '600',
-  },
-  modalBtnAceptar: {
-    backgroundColor: '#16a34a',
-  },
-  modalBtnAceptarText: {
-    color: '#fff',
-    fontWeight: '600',
-  },
+  clienteOpcionNombre: { fontSize: 15, fontWeight: '700', color: OSCURO },
+  clienteOpcionTel:    { fontSize: 12, color: GRIS, marginTop: 2 },
 });

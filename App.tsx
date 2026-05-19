@@ -5,6 +5,19 @@ import { View, ActivityIndicator, Text, StyleSheet } from 'react-native';
 import { supabase } from './src/lib/supabase';
 import AppNavigator from './src/navigation/AppNavigator';
 
+const linking = {
+  prefixes: [],
+  config: {
+    screens: {
+      POS:       '',
+      Productos: 'productos',
+      Inventario:'inventario',
+      Resumen:   'resumen',
+      Ajustes:   'caja',
+    },
+  },
+};
+
 export default function App() {
   const [listo, setListo] = useState(false);
   const [error, setError] = useState('');
@@ -71,7 +84,7 @@ export default function App() {
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer linking={linking}>
       <StatusBar style="auto" />
       <AppNavigator />
     </NavigationContainer>

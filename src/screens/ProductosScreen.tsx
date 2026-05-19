@@ -1,67 +1,64 @@
 import { useState, useEffect, useCallback } from 'react';
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Alert, Modal, ScrollView, RefreshControl, Platform } from 'react-native';
+import {
+  View, Text, TextInput, TouchableOpacity, FlatList,
+  StyleSheet, Alert, Modal, ScrollView, Platform,
+} from 'react-native';
 import { supabase } from '../lib/supabase';
 import BarcodeScanner from '../components/BarcodeScanner';
 import type { Producto, Categoria } from '../types';
 
+const AZUL  = '#2563eb';
+const VERDE = '#16a34a';
+const ROJO  = '#dc2626';
+const GRIS  = '#6b7280';
+const BG    = '#f0f4f8';
+
 export default function ProductosScreen() {
-  const [productos, setProductos] = useState<Producto[]>([]);
+  const [productos, setProductos]   = useState<Producto[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
-  const [cargando, setCargando] = useState(true);
+  const [cargando, setCargando]     = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [busqueda, setBusqueda] = useState('');
+  const [busqueda, setBusqueda]     = useState('');
   const [mostrarModal, setMostrarModal] = useState(false);
-  const [editando, setEditando] = useState<Producto | null>(null);
+  const [editando, setEditando]     = useState<Producto | null>(null);
+  const [mostrarEscaner, setMostrarEscaner] = useState(false);
 
   // Formulario
-  const [nombre, setNombre] = useState('');
+  const [nombre, setNombre]           = useState('');
   const [descripcion, setDescripcion] = useState('');
-  const [precio, setPrecio] = useState('');
-  const [costo, setCosto] = useState('');
+  const [precio, setPrecio]           = useState('');
+  const [costo, setCosto]             = useState('');
   const [stockActual, setStockActual] = useState('');
   const [stockMinimo, setStockMinimo] = useState('');
   const [codigoBarra, setCodigoBarra] = useState('');
-  const [tipo, setTipo] = useState<'producto' | 'servicio'>('producto');
+  const [tipo, setTipo]               = useState<'producto' | 'servicio'>('producto');
   const [categoriaId, setCategoriaId] = useState<number | null>(null);
-  const [mostrarEscaner, setMostrarEscaner] = useState(false);
 
+  // ─── Carga ─────────────────────────────────────────────────
   const loadData = useCallback(async () => {
     try {
       const [productosRes, categoriasRes] = await Promise.all([
         supabase.from('productos').select('*').order('nombre'),
         supabase.from('categorias').select('*').order('nombre'),
       ]);
-
       setProductos(productosRes.data || []);
       setCategorias(categoriasRes.data || []);
-    } catch (error) {
-      console.error('Error:', error);
+    } catch (e) {
+      console.error('Error:', e);
     } finally {
       setCargando(false);
       setRefreshing(false);
     }
   }, []);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  useEffect(() => { loadData(); }, [loadData]);
+  const onRefresh = () => { setRefreshing(true); loadData(); };
 
-  const onRefresh = () => {
-    setRefreshing(true);
-    loadData();
-  };
-
+  // ─── Formulario ────────────────────────────────────────────
   const resetForm = () => {
-    setNombre('');
-    setDescripcion('');
-    setPrecio('');
-    setCosto('');
-    setStockActual('');
-    setStockMinimo('');
-    setCodigoBarra('');
-    setTipo('producto');
-    setCategoriaId(null);
-    setEditando(null);
+    setNombre(''); setDescripcion(''); setPrecio(''); setCosto('');
+    setStockActual(''); setStockMinimo(''); setCodigoBarra('');
+    setTipo('producto'); setCategoriaId(null); setEditando(null);
   };
 
   const abrirModal = (producto?: Producto) => {
@@ -83,11 +80,7 @@ export default function ProductosScreen() {
   };
 
   const guardarProducto = async () => {
-    if (!nombre.trim()) {
-      Alert.alert('Error', 'El nombre es requerido');
-      return;
-    }
-
+    if (!nombre.trim()) { Alert.alert('Error', 'El nombre es requerido'); return; }
     try {
       const data = {
         nombre: nombre.trim(),
@@ -101,15 +94,13 @@ export default function ProductosScreen() {
         categoria_id: categoriaId,
         activo: true,
       };
-
       if (editando) {
         await supabase.from('productos').update(data).eq('id', editando.id);
-        Alert.alert('Éxito', 'Producto actualizado');
+        Alert.alert('Guardado', 'Producto actualizado correctamente');
       } else {
         await supabase.from('productos').insert(data);
-        Alert.alert('Éxito', 'Producto creado');
+        Alert.alert('Listo', 'Producto creado correctamente');
       }
-
       setMostrarModal(false);
       resetForm();
       loadData();
@@ -120,91 +111,68 @@ export default function ProductosScreen() {
 
   const toggleActivo = async (producto: Producto) => {
     try {
-      await supabase
-        .from('productos')
-        .update({ activo: !producto.activo })
-        .eq('id', producto.id);
+      await supabase.from('productos').update({ activo: !producto.activo }).eq('id', producto.id);
       loadData();
-    } catch (error) {
-      Alert.alert('Error', 'No se pudo actualizar');
-    }
+    } catch { Alert.alert('Error', 'No se pudo actualizar'); }
   };
 
   const duplicarProducto = async (producto: Producto) => {
     try {
       const { id, created_at, updated_at, ...resto } = producto as any;
-      const copia = {
-        ...resto,
-        nombre: `Copia de ${producto.nombre}`,
-        codigo_barra: null, // evitar colisión de unique constraint
-      };
-      const { error } = await supabase.from('productos').insert(copia);
+      const { error } = await supabase.from('productos').insert({ ...resto, nombre: `Copia de ${producto.nombre}`, codigo_barra: null });
       if (error) throw error;
       loadData();
     } catch (error: any) {
-      if (Platform.OS === 'web') {
-        window.alert('Error al duplicar: ' + (error.message || 'Inténtalo de nuevo'));
-      } else {
-        Alert.alert('Error', error.message || 'No se pudo duplicar el producto');
-      }
+      if (Platform.OS === 'web') window.alert('Error al duplicar: ' + error.message);
+      else Alert.alert('Error', error.message || 'No se pudo duplicar');
     }
   };
 
   const eliminarProducto = (producto: Producto) => {
-    const ejecutarEliminar = async () => {
+    const ejecutar = async () => {
       try {
-        const { error } = await supabase
-          .from('productos')
-          .delete()
-          .eq('id', producto.id);
+        const { error } = await supabase.from('productos').delete().eq('id', producto.id);
         if (error) throw error;
         setMostrarModal(false);
         resetForm();
         loadData();
       } catch (error: any) {
-        if (Platform.OS === 'web') {
-          window.alert('Error: ' + (error.message || 'No se pudo eliminar'));
-        } else {
-          Alert.alert('Error', error.message || 'No se pudo eliminar el producto');
-        }
+        if (Platform.OS === 'web') window.alert('Error: ' + error.message);
+        else Alert.alert('Error', error.message || 'No se pudo eliminar');
       }
     };
-
     if (Platform.OS === 'web') {
-      // En web, Alert.alert no funciona — usamos window.confirm nativo del navegador
-      const confirmado = window.confirm(`¿Eliminar "${producto.nombre}"?\n\nEsta acción no se puede deshacer.`);
-      if (confirmado) ejecutarEliminar();
+      if (window.confirm(`¿Eliminar "${producto.nombre}"? Esta acción no se puede deshacer.`)) ejecutar();
     } else {
-      Alert.alert(
-        'Eliminar producto',
-        `¿Estás seguro de eliminar "${producto.nombre}"?\n\nEsta acción no se puede deshacer.`,
-        [
-          { text: 'Cancelar', style: 'cancel' },
-          { text: 'Eliminar', style: 'destructive', onPress: ejecutarEliminar },
-        ]
-      );
+      Alert.alert('Eliminar', `¿Eliminar "${producto.nombre}"?\nEsta acción no se puede deshacer.`, [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Eliminar', style: 'destructive', onPress: ejecutar },
+      ]);
     }
   };
 
   const productosFiltrados = productos.filter(p =>
     p.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
-    p.codigo_barra?.includes(busqueda)
+    (p.codigo_barra ?? '').includes(busqueda)
   );
 
+  // ─── Render fila ───────────────────────────────────────────
   const renderProducto = ({ item }: { item: Producto }) => (
     <TouchableOpacity
       style={[styles.productoCard, !item.activo && styles.productoInactivo]}
       onPress={() => abrirModal(item)}
+      activeOpacity={0.75}
     >
       <View style={styles.productoInfo}>
         <Text style={styles.productoNombre}>{item.nombre}</Text>
         <Text style={styles.productoDetalle}>
-          ${item.precio.toFixed(2)} • {item.tipo === 'producto' ? `Stock: ${item.stock_actual}` : 'Servicio'}
+          ${item.precio.toFixed(2)}  ·  {item.tipo === 'producto' ? `Stock: ${item.stock_actual}` : 'Servicio'}
         </Text>
-        {item.codigo_barra && (
-          <Text style={styles.codigoBarra}>{item.codigo_barra}</Text>
-        )}
+        {item.codigo_barra ? (
+          <Text style={styles.codigoBarra}>#{item.codigo_barra}</Text>
+        ) : null}
       </View>
+
       <TouchableOpacity
         style={[styles.toggleBtn, item.activo ? styles.toggleActivo : styles.toggleInactivo]}
         onPress={() => toggleActivo(item)}
@@ -213,39 +181,40 @@ export default function ProductosScreen() {
           {item.activo ? 'Activo' : 'Inactivo'}
         </Text>
       </TouchableOpacity>
-      <TouchableOpacity
-        style={styles.btnDuplicar}
-        onPress={() => duplicarProducto(item)}
-      >
-        <Text style={styles.btnDuplicarText}>⧉</Text>
+
+      <TouchableOpacity style={styles.iconBtn} onPress={() => duplicarProducto(item)}>
+        <Text style={styles.iconBtnText}>⧉</Text>
       </TouchableOpacity>
-      <TouchableOpacity
-        style={styles.btnBorrar}
-        onPress={() => eliminarProducto(item)}
-      >
-        <Text style={styles.btnBorrarText}>🗑</Text>
+
+      <TouchableOpacity style={[styles.iconBtn, styles.iconBtnDanger]} onPress={() => eliminarProducto(item)}>
+        <Text style={styles.iconBtnText}>🗑</Text>
       </TouchableOpacity>
     </TouchableOpacity>
   );
 
+  // ─── UI ────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
+      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Productos</Text>
-        <TouchableOpacity style={styles.btnAgregar} onPress={() => abrirModal()}>
+        <TouchableOpacity style={styles.btnAgregar} onPress={() => abrirModal()} activeOpacity={0.8}>
           <Text style={styles.btnAgregarText}>+ Agregar</Text>
         </TouchableOpacity>
       </View>
 
+      {/* Búsqueda */}
       <View style={styles.searchContainer}>
         <TextInput
           style={styles.searchInput}
-          placeholder="Buscar..."
+          placeholder="Buscar producto o código..."
+          placeholderTextColor="#999"
           value={busqueda}
           onChangeText={setBusqueda}
         />
       </View>
 
+      {/* Lista */}
       <FlatList
         data={productosFiltrados}
         renderItem={renderProducto}
@@ -254,143 +223,130 @@ export default function ProductosScreen() {
         refreshing={refreshing}
         onRefresh={onRefresh}
         ListEmptyComponent={
-          <Text style={styles.emptyText}>
-            {cargando ? 'Cargando...' : 'No hay productos'}
-          </Text>
+          <Text style={styles.emptyText}>{cargando ? 'Cargando...' : 'No hay productos'}</Text>
         }
       />
 
-      {/* Modal de producto */}
+      {/* ── Modal Producto ── */}
       <Modal visible={mostrarModal} animationType="slide">
-        <ScrollView style={styles.modalContainer}>
+        <ScrollView style={styles.modalContainer} keyboardShouldPersistTaps="handled">
+          {/* Modal header */}
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>
-              {editando ? 'Editar Producto' : 'Nuevo Producto'}
-            </Text>
-            <TouchableOpacity onPress={() => setMostrarModal(false)}>
-              <Text style={styles.modalClose}>✕</Text>
+            <Text style={styles.modalTitle}>{editando ? 'Editar Producto' : 'Nuevo Producto'}</Text>
+            <TouchableOpacity onPress={() => { setMostrarModal(false); resetForm(); }} style={styles.btnClose}>
+              <Text style={styles.btnCloseText}>✕</Text>
             </TouchableOpacity>
           </View>
 
           <View style={styles.form}>
+            {/* Nombre */}
             <Text style={styles.label}>Nombre *</Text>
-            <TextInput style={styles.input} value={nombre} onChangeText={setNombre} />
+            <TextInput style={styles.input} value={nombre} onChangeText={setNombre} placeholder="Nombre del producto" />
 
-            <Text style={styles.label}>Descripción</Text>
-            <TextInput style={styles.input} value={descripcion} onChangeText={setDescripcion} multiline />
-
+            {/* Tipo */}
             <Text style={styles.label}>Tipo</Text>
-            <View style={styles.tipoButtons}>
-              <TouchableOpacity
-                style={[styles.tipoBtn, tipo === 'producto' && styles.tipoBtnActive]}
-                onPress={() => setTipo('producto')}
-              >
-                <Text style={[styles.tipoBtnText, tipo === 'producto' && styles.tipoBtnTextActive]}>
-                  Producto
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.tipoBtn, tipo === 'servicio' && styles.tipoBtnActive]}
-                onPress={() => setTipo('servicio')}
-              >
-                <Text style={[styles.tipoBtnText, tipo === 'servicio' && styles.tipoBtnTextActive]}>
-                  Servicio
-                </Text>
-              </TouchableOpacity>
+            <View style={styles.tipoRow}>
+              {(['producto', 'servicio'] as const).map(t => (
+                <TouchableOpacity
+                  key={t}
+                  style={[styles.tipoBtn, tipo === t && styles.tipoBtnActive]}
+                  onPress={() => setTipo(t)}
+                >
+                  <Text style={[styles.tipoBtnText, tipo === t && styles.tipoBtnTextActive]}>
+                    {t === 'producto' ? '📦 Producto' : '🛠 Servicio'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
             </View>
 
-            <Text style={styles.label}>Precio *</Text>
-            <TextInput
-              style={styles.input}
-              value={precio}
-              onChangeText={setPrecio}
-              keyboardType="decimal-pad"
-            />
+            {/* Precio / Costo */}
+            <View style={styles.row2}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.label}>Precio *</Text>
+                <TextInput style={styles.input} value={precio} onChangeText={setPrecio} keyboardType="decimal-pad" placeholder="0.00" />
+              </View>
+              <View style={{ flex: 1, marginLeft: 10 }}>
+                <Text style={styles.label}>Costo</Text>
+                <TextInput style={styles.input} value={costo} onChangeText={setCosto} keyboardType="decimal-pad" placeholder="0.00" />
+              </View>
+            </View>
 
-            <Text style={styles.label}>Costo</Text>
-            <TextInput
-              style={styles.input}
-              value={costo}
-              onChangeText={setCosto}
-              keyboardType="decimal-pad"
-            />
-
+            {/* Stock */}
             {tipo === 'producto' && (
-              <>
-                <Text style={styles.label}>Stock Actual</Text>
-                <TextInput
-                  style={styles.input}
-                  value={stockActual}
-                  onChangeText={setStockActual}
-                  keyboardType="decimal-pad"
-                />
-
-                <Text style={styles.label}>Stock Mínimo</Text>
-                <TextInput
-                  style={styles.input}
-                  value={stockMinimo}
-                  onChangeText={setStockMinimo}
-                  keyboardType="decimal-pad"
-                />
-              </>
+              <View style={styles.row2}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>Stock actual</Text>
+                  <TextInput style={styles.input} value={stockActual} onChangeText={setStockActual} keyboardType="decimal-pad" placeholder="0" />
+                </View>
+                <View style={{ flex: 1, marginLeft: 10 }}>
+                  <Text style={styles.label}>Stock mínimo</Text>
+                  <TextInput style={styles.input} value={stockMinimo} onChangeText={setStockMinimo} keyboardType="decimal-pad" placeholder="0" />
+                </View>
+              </View>
             )}
 
-            <Text style={styles.label}>Código de Barras</Text>
-            <View style={styles.codigoBarraRow}>
+            {/* Código de barras */}
+            <Text style={styles.label}>Código de barras</Text>
+            <View style={styles.codigoRow}>
               <TextInput
                 style={[styles.input, { flex: 1 }]}
                 value={codigoBarra}
                 onChangeText={setCodigoBarra}
                 placeholder="Ingresa o escanea"
               />
-              <TouchableOpacity
-                style={styles.btnEscanearCodigo}
-                onPress={() => setMostrarEscaner(true)}
-              >
-                <Text style={styles.btnEscanearCodigoText}>Escanear</Text>
+              <TouchableOpacity style={styles.btnScanInline} onPress={() => setMostrarEscaner(true)}>
+                <Text style={styles.btnScanInlineText}>📷 Escanear</Text>
               </TouchableOpacity>
             </View>
 
+            {/* Descripción */}
+            <Text style={styles.label}>Descripción (opcional)</Text>
+            <TextInput
+              style={[styles.input, styles.inputMultiline]}
+              value={descripcion}
+              onChangeText={setDescripcion}
+              multiline
+              numberOfLines={2}
+              placeholder="Descripción breve..."
+            />
+
+            {/* Categoría */}
             <Text style={styles.label}>Categoría</Text>
-            <View style={styles.categoriaButtons}>
+            <View style={styles.catGrid}>
               {categorias.map(cat => (
                 <TouchableOpacity
                   key={cat.id}
-                  style={[styles.catBtn, categoriaId === cat.id && styles.catBtnActive]}
-                  onPress={() => setCategoriaId(cat.id)}
+                  style={[styles.catChip, categoriaId === cat.id && styles.catChipActive]}
+                  onPress={() => setCategoriaId(categoriaId === cat.id ? null : cat.id)}
                 >
-                  <Text style={[styles.catBtnText, categoriaId === cat.id && styles.catBtnTextActive]}>
+                  <Text style={[styles.catChipText, categoriaId === cat.id && styles.catChipTextActive]}>
                     {cat.nombre}
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
 
-            <TouchableOpacity style={styles.btnGuardar} onPress={guardarProducto}>
-              <Text style={styles.btnGuardarText}>
-                {editando ? 'Actualizar' : 'Crear'} Producto
-              </Text>
+            {/* Guardar */}
+            <TouchableOpacity style={styles.btnGuardar} onPress={guardarProducto} activeOpacity={0.8}>
+              <Text style={styles.btnGuardarText}>{editando ? 'Guardar cambios' : 'Crear producto'}</Text>
             </TouchableOpacity>
 
+            {/* Eliminar */}
             {editando && (
-              <TouchableOpacity
-                style={styles.btnEliminar}
-                onPress={() => eliminarProducto(editando)}
-              >
-                <Text style={styles.btnEliminarText}>Eliminar producto</Text>
+              <TouchableOpacity style={styles.btnEliminar} onPress={() => eliminarProducto(editando)} activeOpacity={0.8}>
+                <Text style={styles.btnEliminarText}>Eliminar este producto</Text>
               </TouchableOpacity>
             )}
+
+            <View style={{ height: 40 }} />
           </View>
         </ScrollView>
       </Modal>
 
-      {/* Escaner de codigo de barras */}
+      {/* Escáner */}
       <BarcodeScanner
         visible={mostrarEscaner}
-        onScan={(codigo) => {
-          setCodigoBarra(codigo);
-          setMostrarEscaner(false);
-        }}
+        onScan={codigo => { setCodigoBarra(codigo); setMostrarEscaner(false); }}
         onClose={() => setMostrarEscaner(false)}
         titulo="Escanear código de barras"
       />
@@ -399,115 +355,163 @@ export default function ProductosScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  container: { flex: 1, backgroundColor: BG },
+
   header: {
-    backgroundColor: '#2563eb',
-    padding: 16,
-    paddingTop: 48,
+    backgroundColor: AZUL,
+    paddingTop: 52,
+    paddingBottom: 16,
+    paddingHorizontal: 18,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  headerTitle: { color: '#fff', fontSize: 24, fontWeight: 'bold' },
-  btnAgregar: { backgroundColor: '#fff', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 6 },
-  btnAgregarText: { color: '#2563eb', fontWeight: '600' },
-  searchContainer: { padding: 12, backgroundColor: '#fff' },
-  searchInput: { backgroundColor: '#f5f5f5', borderRadius: 8, padding: 10 },
-  list: { padding: 8 },
+  headerTitle: { color: '#fff', fontSize: 26, fontWeight: 'bold' },
+  btnAgregar: {
+    backgroundColor: '#fff',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  btnAgregarText: { color: AZUL, fontWeight: '700', fontSize: 16 },
+
+  searchContainer: {
+    backgroundColor: '#fff',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  searchInput: {
+    backgroundColor: BG,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 18,
+    color: '#111',
+  },
+
+  list: { padding: 10 },
   productoCard: {
     backgroundColor: '#fff',
-    marginVertical: 4,
-    padding: 12,
-    borderRadius: 8,
+    marginBottom: 8,
+    padding: 14,
+    borderRadius: 12,
     flexDirection: 'row',
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.07,
+    shadowRadius: 3,
+    elevation: 2,
   },
-  productoInactivo: { opacity: 0.5 },
+  productoInactivo: { opacity: 0.45 },
   productoInfo: { flex: 1 },
-  productoNombre: { fontSize: 16, fontWeight: '600' },
-  productoDetalle: { fontSize: 14, color: '#666', marginTop: 2 },
-  codigoBarra: { fontSize: 12, color: '#999', marginTop: 2 },
-  toggleBtn: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 4 },
+  productoNombre: { fontSize: 17, fontWeight: '700', color: '#1f2937' },
+  productoDetalle: { fontSize: 15, color: GRIS, marginTop: 3 },
+  codigoBarra: { fontSize: 13, color: '#9ca3af', marginTop: 2 },
+
+  toggleBtn: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, marginLeft: 6 },
   toggleActivo: { backgroundColor: '#dcfce7' },
   toggleInactivo: { backgroundColor: '#fee2e2' },
-  toggleActivoText: { color: '#16a34a', fontSize: 12, fontWeight: '600' },
-  toggleInactivoText: { color: '#dc2626', fontSize: 12, fontWeight: '600' },
-  btnDuplicar: {
-    marginLeft: 8,
+  toggleActivoText: { color: VERDE, fontSize: 13, fontWeight: '700' },
+  toggleInactivoText: { color: ROJO, fontSize: 13, fontWeight: '700' },
+
+  iconBtn: {
+    marginLeft: 6,
     padding: 8,
-    borderRadius: 6,
+    borderRadius: 8,
     backgroundColor: '#e0f2fe',
   },
-  btnDuplicarText: {
-    fontSize: 16,
-  },
-  btnBorrar: {
-    marginLeft: 8,
-    padding: 8,
-    borderRadius: 6,
-    backgroundColor: '#fee2e2',
-  },
-  btnBorrarText: {
-    fontSize: 16,
-  },
-  emptyText: { textAlign: 'center', color: '#666', marginTop: 20 },
+  iconBtnDanger: { backgroundColor: '#fee2e2' },
+  iconBtnText: { fontSize: 18 },
+
+  emptyText: { textAlign: 'center', color: GRIS, marginTop: 40, fontSize: 17 },
+
+  // Modal
   modalContainer: { flex: 1, backgroundColor: '#fff' },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
-    paddingTop: 48,
+    padding: 18,
+    paddingTop: 52,
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e5e5',
+    borderBottomColor: '#e5e7eb',
+    backgroundColor: '#fff',
   },
-  modalTitle: { fontSize: 20, fontWeight: 'bold' },
-  modalClose: { fontSize: 20, color: '#666' },
+  modalTitle: { fontSize: 22, fontWeight: 'bold', color: '#111827' },
+  btnClose: { padding: 6 },
+  btnCloseText: { fontSize: 22, color: GRIS },
+
   form: { padding: 16 },
-  label: { fontSize: 14, fontWeight: '600', marginTop: 12, marginBottom: 6 },
-  input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 12, fontSize: 16 },
-  tipoButtons: { flexDirection: 'row', gap: 8 },
-  tipoBtn: { flex: 1, padding: 10, borderRadius: 8, backgroundColor: '#f5f5f5', alignItems: 'center' },
-  tipoBtnActive: { backgroundColor: '#2563eb' },
-  tipoBtnText: { fontWeight: '600', color: '#666' },
-  tipoBtnTextActive: { color: '#fff' },
-  categoriaButtons: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  catBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, backgroundColor: '#f5f5f5' },
-  catBtnActive: { backgroundColor: '#2563eb' },
-  catBtnText: { fontSize: 14, color: '#666' },
-  catBtnTextActive: { color: '#fff' },
-  btnGuardar: { backgroundColor: '#16a34a', padding: 14, borderRadius: 8, alignItems: 'center', marginTop: 20 },
-  btnGuardarText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-  codigoBarraRow: {
-    flexDirection: 'row',
-    gap: 8,
-    alignItems: 'center',
-  },
-  btnEscanearCodigo: {
-    backgroundColor: '#2563eb',
+  label: { fontSize: 15, fontWeight: '700', color: '#374151', marginTop: 14, marginBottom: 6 },
+  input: {
+    borderWidth: 1.5,
+    borderColor: '#d1d5db',
+    borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    borderRadius: 8,
-    justifyContent: 'center',
+    fontSize: 17,
+    color: '#111827',
+    backgroundColor: '#fafafa',
   },
-  btnEscanearCodigoText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 14,
+  inputMultiline: { minHeight: 70, textAlignVertical: 'top' },
+  row2: { flexDirection: 'row' },
+
+  tipoRow: { flexDirection: 'row', gap: 10 },
+  tipoBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: BG,
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: '#d1d5db',
   },
+  tipoBtnActive: { backgroundColor: AZUL, borderColor: AZUL },
+  tipoBtnText: { fontSize: 15, fontWeight: '700', color: GRIS },
+  tipoBtnTextActive: { color: '#fff' },
+
+  codigoRow: { flexDirection: 'row', gap: 10, alignItems: 'center' },
+  btnScanInline: {
+    backgroundColor: AZUL,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  btnScanInlineText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+
+  catGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  catChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 20,
+    backgroundColor: BG,
+    borderWidth: 1.5,
+    borderColor: '#d1d5db',
+  },
+  catChipActive: { backgroundColor: AZUL, borderColor: AZUL },
+  catChipText: { fontSize: 15, fontWeight: '600', color: GRIS },
+  catChipTextActive: { color: '#fff' },
+
+  btnGuardar: {
+    backgroundColor: VERDE,
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginTop: 24,
+  },
+  btnGuardarText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+
   btnEliminar: {
     backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#dc2626',
-    padding: 14,
-    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: ROJO,
+    paddingVertical: 14,
+    borderRadius: 12,
     alignItems: 'center',
     marginTop: 12,
-    marginBottom: 32,
   },
-  btnEliminarText: {
-    color: '#dc2626',
-    fontSize: 16,
-    fontWeight: '600',
-  },
+  btnEliminarText: { color: ROJO, fontSize: 17, fontWeight: '700' },
 });

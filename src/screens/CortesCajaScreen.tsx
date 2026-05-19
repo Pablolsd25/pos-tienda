@@ -13,6 +13,7 @@ type TimelineItem = {
   label: string;
   sublabel?: string;
   monto: number;
+  esMovimiento: boolean; // true = caja_movimiento editable, false = venta (solo lectura)
 };
 
 type VentaDetalleResumen = {
@@ -36,7 +37,9 @@ export default function CortesCajaScreen() {
   const [mostrarCierre, setMostrarCierre] = useState(false);
   const [mostrarMovimiento, setMostrarMovimiento] = useState(false);
   const [mostrarHistorial, setMostrarHistorial] = useState(false);
+  const [mostrarEditarMov, setMostrarEditarMov] = useState(false);
   const [tipoMovimiento, setTipoMovimiento] = useState<'entrada' | 'salida'>('entrada');
+  const [movSeleccionado, setMovSeleccionado] = useState<CajaMovimiento | null>(null);
 
   // Form fields
   const [montoInicial, setMontoInicial] = useState('');
@@ -44,6 +47,8 @@ export default function CortesCajaScreen() {
   const [notas, setNotas] = useState('');
   const [montoMov, setMontoMov] = useState('');
   const [motivoMov, setMotivoMov] = useState('');
+  const [editMonto, setEditMonto] = useState('');
+  const [editMotivo, setEditMotivo] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
   // Computed totals
@@ -220,6 +225,115 @@ export default function CortesCajaScreen() {
     }
   };
 
+  const abrirEditar = (mov: CajaMovimiento) => {
+    setMovSeleccionado(mov);
+    setEditMonto(mov.monto.toString());
+    setEditMotivo(mov.motivo || '');
+    setErrorMsg('');
+    setMostrarEditarMov(true);
+  };
+
+  const guardarEdicion = async () => {
+    if (!movSeleccionado) return;
+    setErrorMsg('');
+    const monto = parseFloat(editMonto);
+    if (!monto || monto <= 0) {
+      setErrorMsg('El monto debe ser mayor a cero');
+      return;
+    }
+    try {
+      const { error } = await supabase
+        .from('caja_movimientos')
+        .update({ monto, motivo: editMotivo.trim() || null })
+        .eq('id', movSeleccionado.id);
+      if (error) throw error;
+      setMostrarEditarMov(false);
+      setMovSeleccionado(null);
+      loadData();
+    } catch (e: any) {
+      setErrorMsg(e.message);
+    }
+  };
+
+  const confirmarEliminar = () => {
+    if (!movSeleccionado) return;
+    if (Platform.OS === 'web') {
+      if (window.confirm('¿Eliminar este movimiento?')) eliminarMovimiento();
+    } else {
+      Alert.alert('Eliminar', '¿Eliminar este movimiento?', [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Eliminar', style: 'destructive', onPress: eliminarMovimiento },
+      ]);
+    }
+  };
+
+  const eliminarMovimiento = async () => {
+    if (!movSeleccionado) return;
+    setErrorMsg('');
+    try {
+      const { error } = await supabase
+        .from('caja_movimientos')
+        .delete()
+        .eq('id', movSeleccionado.id);
+      if (error) throw error;
+      setMostrarEditarMov(false);
+      setMovSeleccionado(null);
+      loadData();
+    } catch (e: any) {
+      setErrorMsg(e.message);
+    }
+  };
+
+  const confirmarAnularVenta = (ventaId: string) => {
+    if (Platform.OS === 'web') {
+      if (window.confirm('¿Anular esta venta? Se restaurará el inventario.')) anularVenta(ventaId);
+    } else {
+      Alert.alert('Anular venta', '¿Anular esta venta? Se restaurará el inventario.', [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Anular', style: 'destructive', onPress: () => anularVenta(ventaId) },
+      ]);
+    }
+  };
+
+  const anularVenta = async (ventaId: string) => {
+    try {
+      // Obtener detalles para restaurar inventario
+      const { data: detalles } = await supabase
+        .from('venta_detalles')
+        .select('producto_id, cantidad, productos(tipo)')
+        .eq('venta_id', ventaId);
+
+      // Marcar como cancelada
+      const { error } = await supabase
+        .from('ventas')
+        .update({ estado: 'cancelada' })
+        .eq('id', ventaId);
+      if (error) throw error;
+
+      // Restaurar stock para cada producto
+      if (detalles) {
+        for (const d of detalles) {
+          if (d.producto_id && (d.productos as any)?.tipo === 'producto') {
+            const { data: prod } = await supabase
+              .from('productos')
+              .select('stock_actual')
+              .eq('id', d.producto_id)
+              .single();
+            if (prod) {
+              await supabase
+                .from('productos')
+                .update({ stock_actual: prod.stock_actual + d.cantidad })
+                .eq('id', d.producto_id);
+            }
+          }
+        }
+      }
+      loadData();
+    } catch (e: any) {
+      console.error('Error anulando venta:', e);
+    }
+  };
+
   const getPerfilNombre = (id: string) =>
     perfiles.find(p => p.id === id)?.nombre || '—';
 
@@ -252,6 +366,7 @@ export default function CortesCajaScreen() {
       label: 'Venta',
       sublabel: getProductosLabel(v.id),
       monto: v.total,
+      esMovimiento: false,
     })),
     ...movimientos.map(m => ({
       key: m.id,
@@ -261,6 +376,7 @@ export default function CortesCajaScreen() {
         ? `Entrada${m.motivo ? `: ${m.motivo}` : ''}`
         : `Salida${m.motivo ? `: ${m.motivo}` : ''}`,
       monto: m.tipo === 'entrada' ? m.monto : -m.monto,
+      esMovimiento: true,
     })),
   ].sort((a, b) => b.ts.localeCompare(a.ts));
 
@@ -383,6 +499,24 @@ export default function CortesCajaScreen() {
               <Text style={[styles.timelineMonto, item.monto >= 0 ? styles.colorVerde : styles.colorRojo]}>
                 {item.monto >= 0 ? '+' : ''}${Math.abs(item.monto).toFixed(2)}
               </Text>
+              {item.esMovimiento ? (
+                <TouchableOpacity
+                  style={styles.btnAccionMov}
+                  onPress={() => {
+                    const mov = movimientos.find(m => m.id === item.key);
+                    if (mov) abrirEditar(mov);
+                  }}
+                >
+                  <Text style={styles.btnAccionMovText}>Editar</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={[styles.btnAccionMov, styles.btnAccionAnular]}
+                  onPress={() => confirmarAnularVenta(item.key)}
+                >
+                  <Text style={[styles.btnAccionMovText, styles.btnAccionAnularText]}>Anular</Text>
+                </TouchableOpacity>
+              )}
             </View>
           ))}
         </View>
@@ -565,6 +699,54 @@ export default function CortesCajaScreen() {
         </View>
       </Modal>
 
+      {/* ============ MODAL: EDITAR/ELIMINAR MOVIMIENTO ============ */}
+      <Modal visible={mostrarEditarMov} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitulo}>
+              Editar {movSeleccionado?.tipo === 'entrada' ? 'Entrada' : 'Salida'}
+            </Text>
+
+            <Text style={styles.modalLabel}>Monto</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={editMonto}
+              onChangeText={setEditMonto}
+              keyboardType="decimal-pad"
+              placeholder="$0.00"
+              autoFocus
+            />
+
+            <Text style={styles.modalLabel}>Motivo (opcional)</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={editMotivo}
+              onChangeText={setEditMotivo}
+              placeholder="ej. retiro para gastos"
+            />
+
+            {errorMsg !== '' && <Text style={styles.errorText}>{errorMsg}</Text>}
+
+            {/* Eliminar */}
+            <TouchableOpacity style={styles.btnEliminarMov} onPress={confirmarEliminar}>
+              <Text style={styles.btnEliminarMovText}>Eliminar movimiento</Text>
+            </TouchableOpacity>
+
+            <View style={styles.modalBotones}>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalBtnCancelar]}
+                onPress={() => { setMostrarEditarMov(false); setMovSeleccionado(null); setErrorMsg(''); }}
+              >
+                <Text style={styles.modalBtnCancelarText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.modalBtn, styles.modalBtnConfirmar]} onPress={guardarEdicion}>
+                <Text style={styles.modalBtnConfirmarText}>Guardar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* ============ MODAL: HISTORIAL ============ */}
       <Modal visible={mostrarHistorial} transparent animationType="slide">
         <View style={styles.modalOverlay}>
@@ -714,6 +896,29 @@ const styles = StyleSheet.create({
   timelineLabel: { fontSize: 14, color: '#374151', fontWeight: '500' },
   timelineSublabel: { fontSize: 12, color: '#6b7280', marginTop: 2 },
   timelineMonto: { fontSize: 15, fontWeight: 'bold', marginLeft: 8 },
+
+  // Botón acción en fila del timeline
+  btnAccionMov: {
+    marginLeft: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    backgroundColor: '#f3f4f6',
+  },
+  btnAccionMovText: { fontSize: 12, color: '#6b7280', fontWeight: '600' },
+  btnAccionAnular: { backgroundColor: '#fee2e2' },
+  btnAccionAnularText: { color: '#dc2626' },
+
+  // Botón eliminar dentro del modal de edición
+  btnEliminarMov: {
+    marginTop: 16,
+    paddingVertical: 11,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: '#dc2626',
+    alignItems: 'center',
+  },
+  btnEliminarMovText: { color: '#dc2626', fontWeight: '600', fontSize: 14 },
 
   // Botón historial
   btnHistorial: {
