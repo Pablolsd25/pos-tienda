@@ -3,6 +3,7 @@ import {
   View, Text, TextInput, TouchableOpacity, FlatList,
   StyleSheet, Alert, Modal, ScrollView, Platform,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import BarcodeScanner from '../components/BarcodeScanner';
 import type { Producto, Categoria } from '../types';
@@ -51,7 +52,9 @@ export default function ProductosScreen() {
     }
   }, []);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useFocusEffect(
+    useCallback(() => { loadData(); }, [loadData])
+  );
   const onRefresh = () => { setRefreshing(true); loadData(); };
 
   // ─── Formulario ────────────────────────────────────────────

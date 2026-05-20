@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity, FlatList, StyleSheet, Alert, Modal, TextInput, Platform } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { supabase } from '../lib/supabase';
@@ -34,9 +35,9 @@ export default function InventarioScreen() {
     }
   }, []);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  useFocusEffect(
+    useCallback(() => { loadData(); }, [loadData])
+  );
 
   const onRefresh = () => {
     setRefreshing(true);

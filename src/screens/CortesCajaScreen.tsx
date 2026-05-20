@@ -3,6 +3,7 @@ import {
   View, Text, TouchableOpacity, StyleSheet, Alert, Modal,
   TextInput, ScrollView, RefreshControl, Platform, ActivityIndicator,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import type { SesionCaja, Venta, Perfil, CajaMovimiento } from '../types';
 
@@ -50,6 +51,13 @@ export default function CortesCajaScreen() {
   const [editMonto, setEditMonto] = useState('');
   const [editMotivo, setEditMotivo] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+
+  // Editar sesión de caja
+  const [sesionEditando, setSesionEditando] = useState<SesionCaja | null>(null);
+  const [mostrarEditarSesion, setMostrarEditarSesion] = useState(false);
+  const [editSaldoInicial, setEditSaldoInicial] = useState('');
+  const [editSaldoFinal, setEditSaldoFinal] = useState('');
+  const [editNotasSesion, setEditNotasSesion] = useState('');
 
   // Computed totals
   const totalVentas = ventasHoy.reduce((s, v) => s + v.total, 0);
@@ -118,7 +126,9 @@ export default function CortesCajaScreen() {
     }
   }, []);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useFocusEffect(
+    useCallback(() => { loadData(); }, [loadData])
+  );
 
   const onRefresh = () => { setRefreshing(true); loadData(); };
 
@@ -336,6 +346,59 @@ export default function CortesCajaScreen() {
 
   const getPerfilNombre = (id: string) =>
     perfiles.find(p => p.id === id)?.nombre || '—';
+
+  const eliminarSesion = (sesion: SesionCaja) => {
+    const msg = sesion.estado === 'abierta'
+      ? `Esta caja está ABIERTA. ¿Eliminarla de todas formas? (${formatFecha(sesion.fecha_apertura)})`
+      : `¿Eliminar la caja del ${formatFecha(sesion.fecha_apertura)}?`;
+    const confirmar = async () => {
+      try {
+        const { error } = await supabase
+          .from('sesiones_caja').delete().eq('id', sesion.id);
+        if (error) throw error;
+        loadData();
+      } catch (e: any) {
+        showAlert('Error', e.message || 'No se pudo eliminar');
+      }
+    };
+    if (Platform.OS === 'web') {
+      if (window.confirm(msg)) confirmar();
+    } else {
+      Alert.alert('Eliminar caja', msg, [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Eliminar', style: 'destructive', onPress: confirmar },
+      ]);
+    }
+  };
+
+  const editarSesion = (s: SesionCaja) => {
+    setSesionEditando(s);
+    setEditSaldoInicial(s.saldo_inicial.toString());
+    setEditSaldoFinal(s.saldo_final != null ? s.saldo_final.toString() : '');
+    setEditNotasSesion(s.notas || '');
+    setMostrarEditarSesion(true);
+  };
+
+  const guardarEdicionSesion = async () => {
+    if (!sesionEditando) return;
+    const updates: Record<string, unknown> = {
+      saldo_inicial: parseFloat(editSaldoInicial) || 0,
+      notas: editNotasSesion.trim() || null,
+    };
+    if (editSaldoFinal.trim() !== '') {
+      updates.saldo_final = parseFloat(editSaldoFinal) || 0;
+    }
+    try {
+      const { error } = await supabase
+        .from('sesiones_caja').update(updates).eq('id', sesionEditando.id);
+      if (error) throw error;
+      setMostrarEditarSesion(false);
+      setSesionEditando(null);
+      loadData();
+    } catch (e: any) {
+      showAlert('Error', e.message || 'No se pudo guardar');
+    }
+  };
 
   const formatHora = (ts: string) =>
     new Date(ts).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
@@ -783,6 +846,20 @@ export default function CortesCajaScreen() {
                           {s.diferencia >= 0 ? '+' : ''}${s.diferencia.toFixed(2)}
                         </Text>
                       )}
+                      <View style={{ flexDirection: 'row', gap: 6, marginTop: 6 }}>
+                        <TouchableOpacity
+                          style={styles.btnEditarCaja}
+                          onPress={() => editarSesion(s)}
+                        >
+                          <Text style={styles.btnEditarCajaText}>Editar</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.btnBorrarCaja}
+                          onPress={() => eliminarSesion(s)}
+                        >
+                          <Text style={styles.btnBorrarCajaText}>Borrar</Text>
+                        </TouchableOpacity>
+                      </View>
                     </View>
                   </View>
                 ))
@@ -791,6 +868,64 @@ export default function CortesCajaScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* ── Modal: Editar sesión de caja ── */}
+      <Modal visible={mostrarEditarSesion} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitulo}>Editar Caja</Text>
+            {sesionEditando && (
+              <Text style={{ color: '#6b7280', fontSize: 13, marginBottom: 14 }}>
+                {formatFecha(sesionEditando.fecha_apertura)}
+                {sesionEditando.estado === 'abierta' ? '  •  Abierta' : ''}
+              </Text>
+            )}
+
+            <Text style={styles.inputLabel}>Saldo inicial ($)</Text>
+            <TextInput
+              style={styles.inputField}
+              value={editSaldoInicial}
+              onChangeText={setEditSaldoInicial}
+              keyboardType="decimal-pad"
+              placeholder="0.00"
+            />
+
+            <Text style={styles.inputLabel}>Saldo final ($)</Text>
+            <TextInput
+              style={styles.inputField}
+              value={editSaldoFinal}
+              onChangeText={setEditSaldoFinal}
+              keyboardType="decimal-pad"
+              placeholder="Dejar vacío si no aplica"
+            />
+
+            <Text style={styles.inputLabel}>Notas</Text>
+            <TextInput
+              style={[styles.inputField, { height: 70 }]}
+              value={editNotasSesion}
+              onChangeText={setEditNotasSesion}
+              multiline
+              placeholder="Observaciones opcionales"
+            />
+
+            <View style={styles.modalBotones}>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalBtnCancelar]}
+                onPress={() => { setMostrarEditarSesion(false); setSesionEditando(null); }}
+              >
+                <Text style={styles.modalBtnCancelarText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalBtnConfirmar]}
+                onPress={guardarEdicionSesion}
+              >
+                <Text style={styles.modalBtnConfirmarText}>Guardar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
     </ScrollView>
   );
 }
@@ -1006,4 +1141,27 @@ const styles = StyleSheet.create({
   modalBtnVerde: { backgroundColor: '#16a34a' },
   modalBtnRojo: { backgroundColor: '#dc2626' },
   modalBtnConfirmarText: { color: '#fff', fontWeight: 'bold' },
+
+  btnBorrarCaja: {
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    backgroundColor: '#fee2e2',
+    borderRadius: 6,
+  },
+  btnBorrarCajaText: { color: '#dc2626', fontSize: 12, fontWeight: '700' },
+
+  btnEditarCaja: {
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    backgroundColor: '#eff6ff',
+    borderRadius: 6,
+  },
+  btnEditarCajaText: { color: '#2563eb', fontSize: 12, fontWeight: '700' },
+
+  inputLabel: { fontSize: 13, color: '#374151', fontWeight: '600', marginBottom: 4, marginTop: 10 },
+  inputField: {
+    borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8,
+    paddingHorizontal: 12, paddingVertical: 8,
+    fontSize: 14, backgroundColor: '#f9fafb',
+  },
 });

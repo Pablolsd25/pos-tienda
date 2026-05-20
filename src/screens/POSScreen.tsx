@@ -3,6 +3,7 @@ import {
   View, Text, TextInput, TouchableOpacity, FlatList,
   StyleSheet, Alert, Modal, ScrollView, Platform,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import BarcodeScanner from '../components/BarcodeScanner';
 import type { Producto, CarritoItem, SesionCaja, Categoria, Cliente } from '../types';
@@ -85,8 +86,14 @@ export default function POSScreen() {
   }, []);
 
   useEffect(() => {
-    loadProductos(); loadCategorias(); loadSesion(); loadClientes();
-  }, [loadProductos, loadCategorias, loadSesion]);
+    loadClientes();
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadProductos(); loadCategorias(); loadSesion();
+    }, [loadProductos, loadCategorias, loadSesion])
+  );
 
   const loadClientes = async () => {
     const { data } = await supabase

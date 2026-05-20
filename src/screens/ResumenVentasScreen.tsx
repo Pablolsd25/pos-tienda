@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, RefreshControl as RNRefreshControl } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import type { Venta, VentaDetalle, Producto } from '../types';
 
@@ -55,9 +56,9 @@ export default function ResumenVentasScreen() {
     }
   }, [periodo]);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  useFocusEffect(
+    useCallback(() => { loadData(); }, [loadData])
+  );
 
   useEffect(() => {
     const loadDetalles = async () => {

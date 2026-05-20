@@ -3,6 +3,7 @@ import {
   View, Text, TextInput, TouchableOpacity, FlatList,
   StyleSheet, Alert, Modal, ScrollView, Platform,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import type { Cliente, Fiado } from '../types';
 
@@ -75,7 +76,9 @@ export default function FiadosScreen() {
     finally { setCargando(false); }
   }, []);
 
-  useEffect(() => { cargar(); }, [cargar]);
+  useFocusEffect(
+    useCallback(() => { cargar(); }, [cargar])
+  );
 
   // ─── Filtro búsqueda ──────────────────────────────────────────────────────
   const clientesFiltrados = clientes.filter(c =>
